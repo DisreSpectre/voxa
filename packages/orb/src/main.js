@@ -940,7 +940,7 @@ async function openSettingsWindow() {
     const existing = await WebviewWindow.getByLabel("settings");
     if (existing) { try { await existing.setFocus(); } catch {} return; }
     new WebviewWindow("settings", {
-      url: "settings.html", title: "Voxa Settings",
+      url: "settings.html", title: "Settings",
       width: 460, height: 640, resizable: true, decorations: true,
       transparent: false, alwaysOnTop: false, focus: true, center: true,
     });
@@ -961,7 +961,7 @@ async function openConnectorsWindow() {
     const existing = await WebviewWindow.getByLabel("connectors");
     if (existing) { try { await existing.setFocus(); } catch {} return; }
     new WebviewWindow("connectors", {
-      url, title: "Voxa Connectors",
+      url, title: "Connectors",
       width: 1080, height: 760, resizable: true, decorations: true,
       transparent: false, alwaysOnTop: false, focus: true, center: true,
     });
@@ -976,7 +976,7 @@ async function openConnectorsWindow() {
   const row = document.createElement("div");
   row.className = "set-row";
   const l = document.createElement("span");
-  l.className = "set-l"; l.textContent = "Voxa";
+  l.className = "set-l"; l.textContent = "App";
   const b = document.createElement("button");
   b.id = "openSettings"; b.type = "button"; b.className = "link"; b.textContent = "⚙ settings…";
   b.addEventListener("click", () => { closeSettings(); openSettingsWindow(); });

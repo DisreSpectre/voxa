@@ -50,8 +50,17 @@ export const SKINS = {
              blurb: "Metallic wireframe icosahedron caging a glowing crystal core — palette-driven; the core heats to orange-red while speaking." },
   glyph:   { id: "glyph",   name: "Glyph",     sphere: "glyph", ring: "none",    flare: false, scan: false, defaultPalette: "white",
              blurb: "Nothing OS inspired dot-matrix glyph cluster with stark white LEDs and signature red indicator." },
+  // ── Minimal 2D skins ──────────────────────────────────────────────────────
+  dot:     { id: "dot",     name: "Dot",       sphere: "soft",  ring: "none",    flare: false, scan: false, defaultPalette: "white",
+             blurb: "Ultra-minimal: a single soft pulsing dot with state-reactive glow." },
+  ring:    { id: "ring",    name: "Ring",      sphere: "soft",  ring: "none",    flare: false, scan: false, defaultPalette: "ice",
+             blurb: "One clean flat ring with a travelling arc that lights up on voice." },
+  pulse:   { id: "pulse",   name: "Pulse",     sphere: "soft",  ring: "none",    flare: false, scan: false, defaultPalette: "aurora",
+             blurb: "Radar-style concentric expanding rings that ripple out from center." },
+  ghost:   { id: "ghost",   name: "Ghost",     sphere: "soft",  ring: "none",    flare: false, scan: false, defaultPalette: "nord",
+             blurb: "Barely-there translucent outline with a soft fog fill — maximal restraint." },
 };
-export const SKIN_ORDER = ["orbit", "halo", "reactor", "lens", "holo", "minimal", "glyph", "nebula", "handoff", "spectrum", "crystal"];
+export const SKIN_ORDER = ["orbit", "halo", "reactor", "lens", "holo", "minimal", "dot", "ring", "pulse", "ghost", "glyph", "nebula", "handoff", "spectrum", "crystal"];
 
 export const DEFAULT_SKIN = "orbit";
 export const DEFAULT_PALETTE = "ember";
@@ -100,20 +109,25 @@ export function extendAppearance(defs) {
 // Resolve a loose spoken name ("the reactor one", "ice blue", "minimal") to an id.
 export function resolveSkin(q) {
   const s = String(q || "").toLowerCase();
-  for (const id of SKIN_ORDER) {
-    if (s.includes(id) || s.includes(SKINS[id].name.toLowerCase())) return id;
-  }
-  if (/halo|ring|dock(?!.*holo)/.test(s)) return "halo";
+  // Run specific multi-word/phrase patterns FIRST so they aren't swallowed by
+  // short single-word skin ids (e.g. "dot matrix" must go to "glyph", not "dot").
+  if (/glyph|nothing|dot.*matrix|dot.grid|led/.test(s)) return "glyph";
+  if (/halo|dock(?!.*holo)/.test(s)) return "halo";
   if (/reactor|arc|iron/.test(s)) return "reactor";
   if (/lens|iris|eye/.test(s)) return "lens";
   if (/holo|hud|bracket/.test(s)) return "holo";
-  if (/glyph|nothing|dot.*matrix|led/.test(s)) return "glyph";
+  if (/pulse|radar|sonar|ripple/.test(s)) return "pulse";
+  if (/ghost|outline|bare|invisible|translucent/.test(s)) return "ghost";
   if (/minimal|aura|clean|simple|plain|flat/.test(s)) return "minimal";
   if (/nebula|image|art|photo/.test(s)) return "nebula";
   if (/crystal|cage|gem|prism|icosa|diamond|geode/.test(s)) return "crystal";
   if (/spectrum|grid|scheme|network|constellation|gallery|card/.test(s)) return "spectrum";
-  if (/handoff|desktop|reference|voxa|picture|glow|particle/.test(s)) return "handoff";
-  if (/orbit|classic|default|ring/.test(s)) return "orbit";
+  if (/handoff|desktop|reference|picture|glow|particle/.test(s)) return "handoff";
+  if (/orbit|classic|default/.test(s)) return "orbit";
+  // After the specific patterns, do generic id/name loop for remaining skins
+  for (const id of SKIN_ORDER) {
+    if (s.includes(id) || s.includes(SKINS[id].name.toLowerCase())) return id;
+  }
   return null;
 }
 export function resolvePalette(q) {

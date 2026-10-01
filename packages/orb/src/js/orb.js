@@ -746,6 +746,126 @@ export function createOrb(canvas) {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // NEW MINIMAL 2D SKINS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Dot — ultra-minimal: one soft pulsing dot. Nothing OS vibe.
+  // The dot is just white with a gentle state-colored glow.
+  function drawDot(cx, cy, R, breath) {
+    const col = state === "listening" ? pal.accent
+               : state === "speaking" ? pal.core : pal.white;
+    // Outer glow
+    const glowR = R * (0.52 + 0.18 * smoothLevel + 0.06 * breath);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR * 2.2);
+    glow.addColorStop(0, rgba(col, 0.22 + 0.22 * smoothLevel));
+    glow.addColorStop(1, rgba(col, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(cx, cy, glowR * 2.2, 0, Math.PI * 2); ctx.fill();
+    // Core dot — crisp
+    const dotR = R * (0.22 + 0.04 * smoothLevel + 0.025 * breath);
+    const core = ctx.createRadialGradient(cx - dotR * 0.25, cy - dotR * 0.3, 0, cx, cy, dotR);
+    core.addColorStop(0, rgba(pal.white, 1));
+    core.addColorStop(0.55, rgba(col, 0.96 + 0.04 * smoothLevel));
+    core.addColorStop(1, rgba(col, 0.6));
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2); ctx.fill();
+    // Tiny specular highlight (top-left of the dot)
+    const hR = dotR * 0.28;
+    const hg = ctx.createRadialGradient(cx - dotR * 0.28, cy - dotR * 0.32, 0, cx - dotR * 0.28, cy - dotR * 0.32, hR);
+    hg.addColorStop(0, rgba(pal.white, 0.7)); hg.addColorStop(1, rgba(pal.white, 0));
+    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(cx - dotR * 0.28, cy - dotR * 0.32, hR, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Ring — single flat ring, no fill sphere. A travelling arc shows state.
+  function drawRing(cx, cy, R, t) {
+    const col = state === "listening" ? pal.accent
+               : state === "speaking" ? pal.core : pal.line;
+    const rr = R * 0.72 * (1 + 0.07 * smoothLevel);
+    // Main ring
+    ctx.strokeStyle = rgba(col, 0.45 + 0.3 * smoothLevel);
+    ctx.lineWidth = 1.6 + 1.6 * smoothLevel;
+    ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+    // Outer ghost ring
+    ctx.strokeStyle = rgba(col, 0.10 + 0.06 * energy);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, rr * 1.38, 0, Math.PI * 2); ctx.stroke();
+    // Travelling arc indicator — stops for idle
+    if (state !== "idle" || energy > 0.05) {
+      const arc = Math.PI * (0.28 + 0.42 * smoothLevel);
+      const a0 = t * (0.9 + 1.5 * smoothLevel);
+      const grad = ctx.createLinearGradient(
+        cx + Math.cos(a0) * rr, cy + Math.sin(a0) * rr,
+        cx + Math.cos(a0 + arc) * rr, cy + Math.sin(a0 + arc) * rr
+      );
+      grad.addColorStop(0, rgba(col, 0)); grad.addColorStop(1, rgba(pal.white, 0.88));
+      ctx.strokeStyle = grad; ctx.lineWidth = 2.4 + 2 * smoothLevel;
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, cy, rr, a0, a0 + arc); ctx.stroke();
+      ctx.lineCap = "butt";
+    }
+    // Center dot — tiny anchor
+    ctx.fillStyle = rgba(col, 0.55 + 0.35 * smoothLevel);
+    ctx.beginPath(); ctx.arc(cx, cy, 2.5 + 2 * smoothLevel, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Pulse — radar: concentric expanding rings that ripple from center.
+  function drawPulse(cx, cy, R, t) {
+    const col = state === "listening" ? pal.accent
+               : state === "speaking" ? pal.core : pal.line;
+    const speed = 0.28 + 0.65 * (state === "idle" ? 0 : energy);
+    const rings = 4;
+    for (let i = 0; i < rings; i++) {
+      const phase = ((t * speed + i / rings) % 1);
+      const rr = R * 0.18 + R * 1.2 * phase;
+      const al = (1 - phase) * (0.28 + 0.45 * smoothLevel) * (i === 0 ? 1.35 : 1);
+      if (al < 0.01) continue;
+      ctx.strokeStyle = rgba(col, al);
+      ctx.lineWidth = 1.5 - phase;
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Static inner ring (always-on reference)
+    ctx.strokeStyle = rgba(col, 0.20 + 0.08 * smoothLevel);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.22, 0, Math.PI * 2); ctx.stroke();
+    // Center fill
+    const cr = R * (0.11 + 0.05 * smoothLevel);
+    const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
+    cg.addColorStop(0, rgba(pal.white, 0.92)); cg.addColorStop(1, rgba(col, 0.4));
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Ghost — barely-there translucent outline: a thin circle with soft fill and
+  // state-reactive fog. Maximal restraint.
+  function drawGhost(cx, cy, R, breath) {
+    const col = state === "listening" ? pal.accent
+               : state === "speaking" ? pal.core : pal.line;
+    const rr = R * 0.68 * (1 + 0.06 * breath + 0.06 * smoothLevel);
+    // Soft fog fill
+    const fog = ctx.createRadialGradient(cx, cy, rr * 0.1, cx, cy, rr * 1.3);
+    fog.addColorStop(0, rgba(col, 0.06 + 0.12 * smoothLevel));
+    fog.addColorStop(0.65, rgba(col, 0.04 + 0.06 * smoothLevel));
+    fog.addColorStop(1, rgba(col, 0));
+    ctx.fillStyle = fog; ctx.beginPath(); ctx.arc(cx, cy, rr * 1.3, 0, Math.PI * 2); ctx.fill();
+    // Thin outline — the main element
+    ctx.strokeStyle = rgba(col, 0.28 + 0.38 * smoothLevel);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+    // Inner hairline — depth
+    ctx.strokeStyle = rgba(col, 0.08 + 0.08 * smoothLevel);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, rr * 0.66, 0, Math.PI * 2); ctx.stroke();
+    // State indicator: a small lit segment on the ring when active
+    if (state !== "idle" || smoothLevel > 0.03) {
+      const spread = Math.PI * (0.08 + 0.28 * smoothLevel);
+      ctx.strokeStyle = rgba(col, 0.70 + 0.25 * smoothLevel);
+      ctx.lineWidth = 1.5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, cy, rr, -Math.PI / 2 - spread / 2, -Math.PI / 2 + spread / 2); ctx.stroke();
+      ctx.lineCap = "butt";
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // ---- render ----
   function render(now, dt) {
     const r = canvas.getBoundingClientRect();
@@ -775,6 +895,17 @@ export function createOrb(canvas) {
       drawGlyphMatrix(cx, cy, R, t, breath);
     } else if (skin.id === "minimal") {
       drawAuraDisc(cx, cy, R, breath);
+    } else if (skin.id === "dot") {
+      drawDot(cx, cy, R, breath);
+    } else if (skin.id === "ring") {
+      ctx.globalCompositeOperation = "source-over";
+      drawRing(cx, cy, R, t);
+    } else if (skin.id === "pulse") {
+      ctx.globalCompositeOperation = "source-over";
+      drawPulse(cx, cy, R, t);
+    } else if (skin.id === "ghost") {
+      ctx.globalCompositeOperation = "source-over";
+      drawGhost(cx, cy, R, breath);
     } else {
       drawGlow(cx, cy, R, breath);
 
