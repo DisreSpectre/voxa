@@ -225,11 +225,16 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            use tauri::Manager;
             // Linux: wire WebKitGTK's media-stream gates open (mic). No-op elsewhere.
             #[cfg(target_os = "linux")]
             enable_linux_media(app);
             // Voxa one-file launch: the orb supervises the local connector harness.
             start_harness(app.handle());
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet, read_local_config, write_local_config, viewport_eval, brain_dir, open_brain_folder])

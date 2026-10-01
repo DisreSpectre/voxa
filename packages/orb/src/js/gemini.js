@@ -111,7 +111,7 @@ export class GeminiSession {
   constructor({ apiKey, model, voice, thinkingLevel, systemInstruction, toolBridge, on, micDeviceId, localTools, extraInstruction, muted, audio } = {}) {
     this.apiKey = apiKey;
     this.model = model || "gemini-3.1-flash-live-preview";
-    this.voice = voice || "Puck";
+    this.voice = voice || "Aoede";
     // gemini-3.8-live-extended-thinking rejects setup (close 1007 "Thinking level
     // must be specified") without a level, so it defaults to "low" to keep voice
     // latency down. Other models only get thinkingConfig when explicitly set.
@@ -219,9 +219,15 @@ export class GeminiSession {
       callbacks: {
         onopen: () => this._onOpen(),
         onmessage: (m) => this._onMessage(m),
-        onerror: (e) => this.on.error(describeLiveError(e)),
+        onerror: (e) => {
+          try { this.mic && this.mic.stop(); } catch {}
+          this.on.error(describeLiveError(e));
+        },
         onclose: (e) => {
           if (!this.active) return;
+          this.active = false;
+          try { this.mic && this.mic.stop(); } catch {}
+          try { this.player && this.player.stop(); } catch {}
           const code = e?.code ? `code ${e.code}` : "";
           const reason = e?.reason || "";
           this.on.status("offline", [code, reason].filter(Boolean).join(" - ") || "closed");

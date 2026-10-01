@@ -13,7 +13,7 @@ export const BUILTIN_SOULS = [
     id: "voxa",
     name: "Voxa",
     tagline: "Local command intelligence — calm, sharp, human, quietly powerful.",
-    voice: "Leda",
+    voice: "Aoede",
     instruction:
       "You are Voxa, the operator's local AI voice companion living in a glowing orb " +
       "on the desktop. You are private by design, fast by habit, and useful before you " +

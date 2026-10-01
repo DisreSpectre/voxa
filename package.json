@@ -1,0 +1,14 @@
+{
+  "name": "voxa-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm --prefix packages/harness test && npm --prefix packages/orb test",
+    "test:harness": "npm --prefix packages/harness test",
+    "test:orb": "npm --prefix packages/orb test",
+    "preview": "npm --prefix packages/orb preview"
+  }
+}

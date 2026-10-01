@@ -79,16 +79,124 @@ async function serpapiSearch(cfg, query, count, isNews) {
   return { answer, items };
 }
 
-async function ddgSearch(query) {
-  const r = await fetch(`${DDG}?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1`, {
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!r.ok) throw new Error(`DuckDuckGo ${r.status}.`);
-  const data = await r.json();
-  if (data.AbstractText) return { answer: `${data.AbstractText} (${data.AbstractSource || "source"})` };
-  const related = (data.RelatedTopics || []).filter((t) => t.Text).slice(0, 3);
-  if (related.length) return { items: related.map((t) => ({ title: "", snippet: t.Text, url: t.FirstURL || "" })) };
+function decodeHtmlEntities(s) {
+  return String(s || "")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+async function ddgSearch(query, count = 3) {
+  // 1. Try Instant Answer first (fast, keyless, great for definitions/facts)
+  try {
+    const r = await fetch(`${DDG}?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (data.AbstractText) {
+        const src = data.AbstractSource ? ` (${data.AbstractSource})` : "";
+        const url = data.AbstractURL ? ` <${data.AbstractURL}>` : "";
+        return { answer: `${data.AbstractText}${src}${url}` };
+      }
+    }
+  } catch {}
+
+  // 2. Fallback to live DuckDuckGo Lite search (stable HTML table layout, real search results)
+  try {
+    const r = await fetch("https://lite.duckduckgo.com/lite/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+      },
+      body: `q=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(9000),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*class=["']result-link["'][^>]*>([\s\S]*?)<\/a>/gi;
+      const snipRegex = /<td[^>]*class=["']result-snippet["'][^>]*>([\s\S]*?)<\/td>/gi;
+      const links = [...html.matchAll(linkRegex)];
+      const snips = [...html.matchAll(snipRegex)];
+
+      const items = [];
+      const limit = Math.min(count, links.length);
+      for (let i = 0; i < limit; i++) {
+        let url = links[i][1];
+        try {
+          const u = new URL(url, "https://duckduckgo.com");
+          const uddg = u.searchParams.get("uddg");
+          if (uddg) url = decodeURIComponent(uddg);
+        } catch {}
+        const title = decodeHtmlEntities(links[i][2]);
+        const snippet = snips[i] ? decodeHtmlEntities(snips[i][1]) : "";
+        if (title || snippet) {
+          items.push({ title, snippet, url });
+        }
+      }
+      if (items.length) return { items };
+    }
+  } catch (e) {
+    console.error("[websearch] ddg lite error:", e?.message || e);
+  }
+
+  // 3. Fallback to Wikipedia search (reliable, zero-rate-limit encyclopedia & facts)
+  try {
+    const wiki = await wikipediaSearch(query, count);
+    if (wiki.items?.length) return wiki;
+  } catch {}
+
   return { items: [] };
+}
+
+async function wikipediaSearch(query, count = 3) {
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": "Voxa/1.5 (https://github.com/voxa)" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return { items: [] };
+    const data = await r.json();
+    const list = data?.query?.search || [];
+    const items = list.slice(0, count).map((s) => ({
+      title: decodeHtmlEntities(s.title),
+      snippet: decodeHtmlEntities(s.snippet),
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, "_"))}`,
+    }));
+    return { items };
+  } catch {
+    return { items: [] };
+  }
+}
+
+async function googleNewsSearch(topic, count = 3) {
+  try {
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return { items: [] };
+    const xml = await r.text();
+    const itemMatches = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>/gi)];
+    const items = itemMatches.slice(0, count).map((m) => ({
+      title: decodeHtmlEntities(m[1]),
+      snippet: "",
+      url: m[2],
+    }));
+    return { items };
+  } catch {
+    return { items: [] };
+  }
 }
 
 function render(query, answer, items) {
@@ -222,8 +330,10 @@ export default {
           const p = provider(cfg);
           if (p === "brave") return render(topic, "", await braveSearch(cfg, BRAVE_NEWS, topic, count));
           if (p === "tavily") { const o = await tavilySearch(cfg, topic, count, "news"); return render(topic, o.answer, o.items); }
-          if (p === "serpapi") { const o = await serpapiSearch(cfg, topic, count, true); return render(topic, "", o.items); }
-          const o = await ddgSearch(topic); return render(topic, o.answer, o.items);
+          const o = await ddgSearch(topic, count);
+          if (o.items?.length || o.answer) return render(topic, o.answer, o.items);
+          const news = await googleNewsSearch(topic, count);
+          return render(topic, "", news.items);
         } catch (e) { return { error: e?.message || String(e) }; }
       },
     },
@@ -236,5 +346,5 @@ async function runSearch(cfg, query, count) {
   if (p === "brave") return render(query, "", await braveSearch(cfg, BRAVE_WEB, query, count));
   if (p === "tavily") { const o = await tavilySearch(cfg, query, count); return render(query, o.answer, o.items); }
   if (p === "serpapi") { const o = await serpapiSearch(cfg, query, count, false); return render(query, o.answer, o.items); }
-  const o = await ddgSearch(query); return render(query, o.answer, o.items);
+  const o = await ddgSearch(query, count); return render(query, o.answer, o.items);
 }

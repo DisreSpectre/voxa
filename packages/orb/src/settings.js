@@ -56,6 +56,7 @@ async function load() {
   $("provider").value = v.provider || "gemini";
   $("model").value = v.model || "";
   if (v.voiceName) $("voiceName").value = v.voiceName;
+  else $("voiceName").value = localStorage.getItem("voxa.voice") || "Aoede";
   $("source").value = (Array.isArray(cfg.sources) && cfg.sources[0]?.url) || "http://localhost:3010";
   try { $("key").value = localStorage.getItem(KEY_LS) || ""; } catch {}
   try { $("openaiKey").value = localStorage.getItem("voxa.openaiKey") || ""; } catch {}
@@ -86,6 +87,7 @@ async function save() {
     openaiVoice: $("openaiVoice").value.trim(),
     daemonUrl: $("daemonUrl").value.trim(),
   };
+  try { localStorage.setItem("voxa.voice", $("voiceName").value); } catch {}
 
   const soulId = $("soul").value;
   const name = $("personaName").value.trim();

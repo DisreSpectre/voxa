@@ -18,8 +18,10 @@ export const PALETTES = {
   aurora:  { id: "aurora",  name: "Aurora",  core: [56, 224, 180],  accent: [150, 110, 255], hot: [200, 255, 236], deep: [16, 92, 82],   line: [150, 236, 212], white: [240, 255, 250] },
   plasma:  { id: "plasma",  name: "Plasma",  core: [78, 130, 255],  accent: [255, 84, 200],  hot: [200, 214, 255], deep: [28, 40, 132],  line: [160, 182, 255], white: [242, 244, 255] },
   solar:   { id: "solar",   name: "Solar",   core: [255, 176, 40],  accent: [255, 70, 96],   hot: [255, 226, 168], deep: [140, 62, 8],   line: [255, 202, 130], white: [255, 250, 238] },
+  white:   { id: "white",   name: "Pure White", core: [255, 255, 255], accent: [225, 235, 250], hot: [255, 255, 255], deep: [42, 48, 60], line: [210, 220, 240], white: [255, 255, 255] },
+  nord:    { id: "nord",    name: "Nord",    core: [136, 192, 208], accent: [129, 161, 193], hot: [236, 239, 244], deep: [46, 52, 64],  line: [143, 188, 187], white: [245, 250, 255] },
 };
-export const PALETTE_ORDER = ["ember", "ice", "violet", "emerald", "sunset", "aurora", "plasma", "solar"];
+export const PALETTE_ORDER = ["ember", "ice", "violet", "emerald", "sunset", "aurora", "plasma", "solar", "white", "nord"];
 
 // Skin = how the orb is drawn. `sphere` picks the body renderer; the flags toggle
 // ornament layers. `defaultPalette` is just the suggested pairing — palette is
@@ -46,13 +48,15 @@ export const SKINS = {
               blurb: "Reference-style network orb with spectral glow, constellation nodes, and soft panel-friendly depth." },
   crystal: { id: "crystal", name: "Crystal Cage", sphere: "crystal", ring: "none", flare: false, scan: false, defaultPalette: "ice",
              blurb: "Metallic wireframe icosahedron caging a glowing crystal core — palette-driven; the core heats to orange-red while speaking." },
+  glyph:   { id: "glyph",   name: "Glyph",     sphere: "glyph", ring: "none",    flare: false, scan: false, defaultPalette: "white",
+             blurb: "Nothing OS inspired dot-matrix glyph cluster with stark white LEDs and signature red indicator." },
 };
-export const SKIN_ORDER = ["orbit", "halo", "reactor", "lens", "holo", "minimal", "nebula", "handoff", "spectrum", "crystal"];
+export const SKIN_ORDER = ["orbit", "halo", "reactor", "lens", "holo", "minimal", "glyph", "nebula", "handoff", "spectrum", "crystal"];
 
 export const DEFAULT_SKIN = "orbit";
 export const DEFAULT_PALETTE = "ember";
 
-const SAFE_SKIN_SPHERES = new Set(["wire", "soft", "lens"]);
+const SAFE_SKIN_SPHERES = new Set(["wire", "soft", "lens", "glyph"]);
 const SAFE_SKIN_RINGS = new Set(["none", "orbit", "halo", "reactor", "spectrum"]);
 const safeId = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
 const safeColor = (v) => Array.isArray(v) && v.length === 3 ? v.map((n) => Math.max(0, Math.min(255, Number(n) || 0))) : null;
@@ -103,7 +107,8 @@ export function resolveSkin(q) {
   if (/reactor|arc|iron/.test(s)) return "reactor";
   if (/lens|iris|eye/.test(s)) return "lens";
   if (/holo|hud|bracket/.test(s)) return "holo";
-  if (/minimal|clean|simple|plain/.test(s)) return "minimal";
+  if (/glyph|nothing|dot.*matrix|led/.test(s)) return "glyph";
+  if (/minimal|aura|clean|simple|plain|flat/.test(s)) return "minimal";
   if (/nebula|image|art|photo/.test(s)) return "nebula";
   if (/crystal|cage|gem|prism|icosa|diamond|geode/.test(s)) return "crystal";
   if (/spectrum|grid|scheme|network|constellation|gallery|card/.test(s)) return "spectrum";
@@ -116,6 +121,8 @@ export function resolvePalette(q) {
   for (const id of PALETTE_ORDER) {
     if (s.includes(id) || s.includes(PALETTES[id].name.toLowerCase())) return id;
   }
+  if (/white|pure|monochrome|pearl|clean/.test(s)) return "white";
+  if (/nord|arctic|frost|polar/.test(s)) return "nord";
   if (/sunset|pink.*gold|rose/.test(s)) return "sunset";
   if (/aurora|teal.*violet|northern/.test(s)) return "aurora";
   if (/plasma|electric|blue.*pink/.test(s)) return "plasma";
@@ -133,6 +140,8 @@ export const LAYOUTS = {
   // settingsH = window height used while settings is open (taller than collapsed).
   dock:     { id: "dock",     name: "Dock",     collapsed: { w: 460, h: 140 }, expanded: { w: 460, h: 520 }, settingsH: 540,
               blurb: "Compact capsule — orb beside a slim panel." },
+  taskbar:  { id: "taskbar",  name: "Taskbar",  collapsed: { w: 56, h: 56 },   peek: { w: 380, h: 140 }, expanded: { w: 380, h: 500 }, settingsH: 520,
+              blurb: "Minimalist 44px orb for Windows 11 compact taskbar with hover flyout." },
   capsule:  { id: "capsule",  name: "Capsule",  collapsed: { w: 470, h: 144 }, expanded: { w: 560, h: 440 }, settingsH: 540,
               blurb: "Sculpted floating pill — glass shell, orb inset (Concept 5)." },
   reactor:  { id: "reactor",  name: "Reactor",  collapsed: { w: 500, h: 196 }, expanded: { w: 600, h: 580 }, settingsH: 580,
@@ -140,17 +149,96 @@ export const LAYOUTS = {
   holodock: { id: "holodock", name: "Holo Dock", collapsed: { w: 510, h: 152 }, expanded: { w: 620, h: 560 }, settingsH: 560,
               blurb: "Angular holographic panels with notched corners (Concept 10)." },
 };
-export const LAYOUT_ORDER = ["dock", "capsule", "reactor", "holodock"];
+export const LAYOUT_ORDER = ["dock", "taskbar", "capsule", "reactor", "holodock"];
 export const DEFAULT_LAYOUT = "dock";
 export function getLayout(id) { return LAYOUTS[id] || LAYOUTS[DEFAULT_LAYOUT]; }
 export function resolveLayout(q) {
   const s = String(q || "").toLowerCase();
-  for (const id of LAYOUT_ORDER) {
+  for (const id of [...LAYOUT_ORDER].sort((a, b) => b.length - a.length)) {
     if (s.includes(id) || s.includes(LAYOUTS[id].name.toLowerCase())) return id;
   }
+  if (/taskbar|minimal|compact.*taskbar|tray|mini|tiny/.test(s)) return "taskbar";
   if (/capsule|pill|floating/.test(s)) return "capsule";
   if (/reactor|arc|iron|hud/.test(s)) return "reactor";
-  if (/holo|holographic|notch|bracket|angular|dock(?!.*compact)/.test(s)) return "holodock";
+  if (/holo|holographic|notch|bracket|angular/.test(s)) return "holodock";
   if (/dock|compact|default|small|simple/.test(s)) return "dock";
   return null;
 }
+
+// Full app visual THEMES — background, glass styling, and translucency modes.
+// Switchable at runtime via body.theme-<id>.
+export const THEMES = {
+  glass:  { id: "glass",  name: "Dark Glass",   blurb: "Default deep dark glass with subtle reflections." },
+  liquid: { id: "liquid", name: "Liquid Glass", blurb: "Translucent liquid blur showing your desktop wallpaper." },
+  nord:   { id: "nord",   name: "Nord Arctic",  blurb: "Authentic Arctic frost palette with cool slate grays." },
+  white:  { id: "white",  name: "Pure White",   blurb: "High contrast pure monochrome accent." },
+};
+export const THEME_ORDER = ["glass", "liquid", "nord", "white"];
+export const DEFAULT_THEME = "glass";
+
+export function getTheme(id) {
+  return THEMES[id] || THEMES[DEFAULT_THEME];
+}
+
+export function resolveTheme(q) {
+  const s = String(q || "").toLowerCase();
+  if (/liquid|blur|wallpaper|desktop|transparent|acrylic|mica/.test(s)) return "liquid";
+  if (/nord|arctic|frost|polar|snow/.test(s)) return "nord";
+  if (/white|pure|monochrome|pearl|clean/.test(s)) return "white";
+  if (/glass|default|classic|dark/.test(s)) return "glass";
+  return null;
+}
+
+// Quick voices selectable from the orb settings panel.
+export const QUICK_VOICES = [
+  { id: "Aoede",  name: "Aoede",  gender: "female", blurb: "Female · Clear, bright, and upbeat (Default)" },
+  { id: "Leda",   name: "Leda",   gender: "female", blurb: "Female · Warm, natural, and conversational" },
+  { id: "Kore",   name: "Kore",   gender: "female", blurb: "Female · Soft, calm, and gentle" },
+  { id: "Zephyr", name: "Zephyr", gender: "female", blurb: "Female · Relaxed, smooth, and mellow" },
+  { id: "Puck",   name: "Puck",   gender: "male",   blurb: "Male · Playful, quick, and dry-witted" },
+  { id: "Charon", name: "Charon", gender: "male",   blurb: "Male · Calm, formal, and authoritative" },
+  { id: "Fenrir", name: "Fenrir", gender: "male",   blurb: "Male · Direct, intense, and steady" },
+];
+export const DEFAULT_VOICE = "Aoede";
+
+// Full 30-voice catalog supported by Google Gemini Live / TTS
+export const ALL_GEMINI_VOICES = [
+  { id: "Aoede",        name: "Aoede",        gender: "female", tone: "Breezy & bright (Default)" },
+  { id: "Leda",         name: "Leda",         gender: "female", tone: "Youthful & warm" },
+  { id: "Kore",         name: "Kore",         gender: "female", tone: "Firm & gentle" },
+  { id: "Zephyr",       name: "Zephyr",       gender: "female", tone: "Bright & relaxed" },
+  { id: "Callirrhoe",   name: "Callirrhoe",   gender: "female", tone: "Easy-going & clear" },
+  { id: "Autonoe",      name: "Autonoe",      gender: "female", tone: "Bright & energetic" },
+  { id: "Despina",      name: "Despina",      gender: "female", tone: "Smooth & calm" },
+  { id: "Erinome",      name: "Erinome",      gender: "female", tone: "Clear & articulate" },
+  { id: "Laomedeia",    name: "Laomedeia",    gender: "female", tone: "Upbeat & cheerful" },
+  { id: "Achernar",     name: "Achernar",     gender: "female", tone: "Soft & gentle" },
+  { id: "Vindemiatrix", name: "Vindemiatrix", gender: "female", tone: "Gentle & serene" },
+  { id: "Sulafat",      name: "Sulafat",      gender: "female", tone: "Warm & engaging" },
+  { id: "Puck",         name: "Puck",         gender: "male",   tone: "Upbeat & playful" },
+  { id: "Charon",       name: "Charon",       gender: "male",   tone: "Informative & formal" },
+  { id: "Fenrir",       name: "Fenrir",       gender: "male",   tone: "Excitable & direct" },
+  { id: "Orus",         name: "Orus",         gender: "male",   tone: "Firm & steady" },
+  { id: "Enceladus",    name: "Enceladus",    gender: "male",   tone: "Breathy & expressive" },
+  { id: "Iapetus",      name: "Iapetus",      gender: "male",   tone: "Clear & thoughtful" },
+  { id: "Umbriel",      name: "Umbriel",      gender: "male",   tone: "Easy-going & mellow" },
+  { id: "Algieba",      name: "Algieba",      gender: "male",   tone: "Smooth & confident" },
+  { id: "Algenib",      name: "Algenib",      gender: "male",   tone: "Gravelly & distinct" },
+  { id: "Rasalgethi",   name: "Rasalgethi",   gender: "male",   tone: "Informative & grounded" },
+  { id: "Alnilam",      name: "Alnilam",      gender: "male",   tone: "Firm & crisp" },
+  { id: "Schedar",      name: "Schedar",      gender: "male",   tone: "Even & measured" },
+  { id: "Gacrux",       name: "Gacrux",       gender: "male",   tone: "Mature & resonant" },
+  { id: "Pulcherrima",  name: "Pulcherrima",  gender: "male",   tone: "Forward & vibrant" },
+  { id: "Achird",       name: "Achird",       gender: "male",   tone: "Friendly & casual" },
+  { id: "Zubenelgenubi",name: "Zubenelgenubi",gender: "male",   tone: "Casual & natural" },
+  { id: "Sadachbia",    name: "Sadachbia",    gender: "male",   tone: "Lively & animated" },
+  { id: "Sadaltager",   name: "Sadaltager",   gender: "male",   tone: "Knowledgeable & authoritative" },
+];
+
+export const DEFAULT_LIVE_MODELS = [
+  { id: "gemini-3.1-flash-live-preview", name: "Gemini 3.1 Flash Live", blurb: "Real-time streaming audio model (Recommended)" },
+  { id: "gemini-2.5-flash-native-audio-preview", name: "Gemini 2.5 Flash Audio", blurb: "Native audio preview with multimodal reasoning" },
+  { id: "gemini-3.8-live", name: "Gemini 3.8 Live", blurb: "High reasoning live streaming model" },
+];
+export const DEFAULT_MODEL = "gemini-3.1-flash-live-preview";
+

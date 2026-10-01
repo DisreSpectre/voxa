@@ -568,7 +568,93 @@ export function createOrb(canvas) {
       ctx.strokeStyle = rgba(pal.accent, 0.22 + 0.55 * lvl * seed);
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - h); ctx.stroke();
     }
-    ctx.lineCap = "butt";
+  }
+
+  // 2D Minimal Aura Disc: Flat, peaceful glowing disc that breathes calmly without wireframes or rings.
+  function drawAuraDisc(cx, cy, R, breath) {
+    const pulse = 1 + 0.14 * smoothLevel + 0.04 * breath;
+    const rad = R * 0.76 * pulse;
+    const col = state === "speaking" ? pal.core : state === "listening" ? pal.accent : pal.core;
+    const g = ctx.createRadialGradient(cx, cy, rad * 0.08, cx, cy, rad);
+    g.addColorStop(0, rgba(pal.white, 0.96));
+    g.addColorStop(0.32, rgba(col, 0.82 + 0.12 * energy));
+    g.addColorStop(0.72, rgba(col, 0.22 + 0.15 * smoothLevel));
+    g.addColorStop(1, rgba(col, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Solid inner core for crisp 2D presence
+    const coreR = R * 0.28 * (1 + 0.08 * smoothLevel);
+    const gCore = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+    gCore.addColorStop(0, rgba(pal.white, 1));
+    gCore.addColorStop(0.75, rgba(pal.white, 0.92));
+    gCore.addColorStop(1, rgba(col, 0.3));
+    ctx.fillStyle = gCore;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Nothing OS inspired Glyph Matrix: Retro-futuristic LED dot-matrix circle with red indicator.
+  function drawGlyphMatrix(cx, cy, R, t, breath) {
+    const gridSize = 11;
+    const step = (R * 1.5) / gridSize;
+    const dotBaseRadius = step * 0.26;
+    const maxDist = R * 0.78;
+
+    // Dark technical backdrop disc with subtle outline
+    ctx.fillStyle = "rgba(8, 10, 14, 0.72)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.84, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Dot-matrix grid
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        const x = cx + (c - (gridSize - 1) / 2) * step;
+        const y = cy + (r - (gridSize - 1) / 2) * step;
+        const dist = Math.hypot(x - cx, y - cy);
+        if (dist > maxDist) continue;
+
+        const normDist = dist / maxDist;
+        const wave = Math.sin(t * 3.2 - normDist * 5.5) * 0.5 + 0.5;
+        let lit = 0.20 + 0.12 * breath;
+        if (state === "listening" || state === "speaking") {
+          lit += (1 - normDist) * smoothLevel * 0.8 + wave * 0.2 * smoothLevel;
+        } else {
+          lit += (1 - normDist) * 0.22 * breath;
+        }
+        lit = Math.min(1, Math.max(0.08, lit));
+
+        const dotR = dotBaseRadius * (0.8 + 0.3 * lit);
+        ctx.fillStyle = rgba(pal.white, lit);
+        ctx.beginPath();
+        ctx.arc(x, y, dotR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Nothing signature red recording/active indicator dot (top-right quadrant)
+    const redX = cx + R * 0.46;
+    const redY = cy - R * 0.46;
+    const redAlpha = state === "listening" || state === "speaking" ? 0.98 : 0.45 + 0.35 * breath;
+    const redG = ctx.createRadialGradient(redX, redY, 0, redX, redY, step * 0.85);
+    redG.addColorStop(0, `rgba(255, 50, 50, ${redAlpha})`);
+    redG.addColorStop(0.55, `rgba(220, 20, 20, ${redAlpha * 0.65})`);
+    redG.addColorStop(1, "rgba(220, 20, 20, 0)");
+    ctx.fillStyle = redG;
+    ctx.beginPath();
+    ctx.arc(redX, redY, step * 0.85, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 90, 90, ${redAlpha})`;
+    ctx.beginPath();
+    ctx.arc(redX, redY, step * 0.32, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function drawCore(cx, cy, R, breath) {
@@ -675,7 +761,8 @@ export function createOrb(canvas) {
     ctx.clearRect(0, 0, W, H);
     ctx.globalCompositeOperation = "lighter";
 
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.3;
+    const isSmall = Math.min(W, H) <= 48;
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * (isSmall ? 0.40 : 0.3);
     const breath = Math.sin(t * (1.1 + 0.6 * energy));
     spin += spinRate() * dt;
     const rot = spin;
@@ -684,6 +771,10 @@ export function createOrb(canvas) {
       drawCrystalCage(cx, cy, R, t, breath);
     } else if (skin.id === "handoff") {
       drawHandoffSkin(cx, cy, R, t, breath, rot);
+    } else if (skin.id === "glyph") {
+      drawGlyphMatrix(cx, cy, R, t, breath);
+    } else if (skin.id === "minimal") {
+      drawAuraDisc(cx, cy, R, breath);
     } else {
       drawGlow(cx, cy, R, breath);
 
@@ -703,7 +794,7 @@ export function createOrb(canvas) {
       if (skin.scan) drawScanArc(cx, cy, R, rot);
 
       if (skin.id === "orbit") drawWaveRing(cx, cy, R, t);
-      else if (skin.id === "minimal" || skin.id === "nebula") drawRipples(cx, cy, R, t);
+      else if (skin.id === "nebula") drawRipples(cx, cy, R, t);
       else if (skin.id === "holo") drawHudBar(cx, cy, R, t);
 
       drawCore(cx, cy, R, breath);

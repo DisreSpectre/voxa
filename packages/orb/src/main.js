@@ -17,7 +17,7 @@ import { FocusManager } from "./js/focus.js";
 import { makeSessionId, buildSessionPayload, postSession, getLearnBase, heuristicCompact } from "./js/learn.mjs";
 import { DEBRIEF_TOOL, routeDebrief, buildDebriefRequestText, buildMiniDebriefRequestText } from "./js/debrief.mjs";
 import { normalizeLearningMode, effectiveMode, buildRecallQuery, pickRecallTool, formatRecallBlock, buildLearningReport, LEARNING_MODE_ORDER, LEARNING_MODES } from "./js/learning.mjs";
-import { SKINS, PALETTES, SKIN_ORDER, PALETTE_ORDER, DEFAULT_SKIN, DEFAULT_PALETTE, getSkin, getPalette, resolveSkin, resolvePalette, extendAppearance, LAYOUTS, LAYOUT_ORDER, DEFAULT_LAYOUT, getLayout, resolveLayout } from "./js/skins.js";
+import { SKINS, PALETTES, SKIN_ORDER, PALETTE_ORDER, DEFAULT_SKIN, DEFAULT_PALETTE, getSkin, getPalette, resolveSkin, resolvePalette, extendAppearance, LAYOUTS, LAYOUT_ORDER, DEFAULT_LAYOUT, getLayout, resolveLayout, THEMES, THEME_ORDER, DEFAULT_THEME, getTheme, resolveTheme, QUICK_VOICES, DEFAULT_VOICE, ALL_GEMINI_VOICES, DEFAULT_LIVE_MODELS, DEFAULT_MODEL } from "./js/skins.js";
 
 const TAURI = window.__TAURI__;
 const els = {
@@ -53,6 +53,8 @@ const els = {
   send: document.getElementById("send"),
   hint: document.getElementById("hint"),
   sysstats: document.getElementById("sysstats"),
+  contextMenu: document.getElementById("contextMenu"),
+  ctxTalkLabel: document.getElementById("ctxTalkLabel"),
 };
 if (!TAURI) els.body.classList.add("web-preview");
 
@@ -60,7 +62,7 @@ if (!TAURI) els.body.classList.add("web-preview");
 // listening/speaking; setAudioLevel(0..1) feeds it REAL audio (see below).
 const orb = createOrb(els.orbCanvas);
 
-// ── Appearance: skin + palette (persist + apply live, no restart) ───────────
+// ── Appearance: skin + palette + layout + theme (persist + apply live) ─────
 const appearance = {
   get skin() { return localStorage.getItem("voxa.skin") || DEFAULT_SKIN; },
   set skin(v) { localStorage.setItem("voxa.skin", v); },
@@ -68,6 +70,10 @@ const appearance = {
   set palette(v) { localStorage.setItem("voxa.palette", v); },
   get layout() { return localStorage.getItem("voxa.layout") || DEFAULT_LAYOUT; },
   set layout(v) { localStorage.setItem("voxa.layout", v); },
+  get theme() { return localStorage.getItem("voxa.theme") || DEFAULT_THEME; },
+  set theme(v) { localStorage.setItem("voxa.theme", v); },
+  get taskbarSize() { return localStorage.getItem("voxa.taskbarSize") || "default"; },
+  set taskbarSize(v) { localStorage.setItem("voxa.taskbarSize", v === "compact" ? "compact" : "default"); },
 };
 const curLayout = () => getLayout(appearance.layout);
 let expanded = false; // window expanded (chat) state — declared early for layout sizing
@@ -75,8 +81,9 @@ let expanded = false; // window expanded (chat) state — declared early for lay
 // Control-state (declared early so applyAppearance()'s boot call can no-op
 // refreshControls() before the panel is built — avoids a TDZ on first run).
 let controlsBuilt = false;
-const skinBtns = {}, palBtns = {}, modeBtns = {}, layBtns = {}, learnBtns = {}, statsBtns = {};
+const skinBtns = {}, palBtns = {}, themeBtns = {}, modeBtns = {}, layBtns = {}, learnBtns = {}, statsBtns = {}, sleepBtns = {}, voiceBtns = {}, modelBtns = {}, taskbarSizeBtns = {};
 let learnHintEl = null;
+let activeBadgeEl = null, voiceMoreSelEl = null, customVoiceInputEl = null, customModelInputEl = null;
 // RGB [0-255] -> [hueDeg, sat%] for driving the chrome's HSL accent variables.
 function rgbToHs(c) {
   const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
@@ -111,6 +118,19 @@ function applyAppearance() {
 }
 function chooseSkin(id) { const s = getSkin(id); appearance.skin = s.id; applyAppearance(); return s; }
 function choosePalette(id) { const p = getPalette(id); appearance.palette = p.id; applyAppearance(); return p; }
+function applyTheme(id) {
+  const t = getTheme(id);
+  appearance.theme = t.id;
+  for (const k of THEME_ORDER) els.body.classList.toggle("theme-" + k, k === t.id);
+  if (typeof refreshControls === "function") refreshControls();
+  return t;
+}
+function chooseTheme(id) {
+  const t = applyTheme(id);
+  if (t.id === "nord") choosePalette("nord");
+  else if (t.id === "white") choosePalette("white");
+  return t;
+}
 // ── Layout (window arrangement; switchable at runtime) ──────────────────────
 async function growToSettings() {
   // Auto-fit: size the window to the settings panel's ACTUAL content (chip rows
@@ -138,14 +158,28 @@ async function applyLayout(id, resize = true) {
   for (const k of LAYOUT_ORDER) els.body.classList.toggle("lay-" + k, k === lay.id);
   if (resize && TAURI) {
     if (!els.settings.classList.contains("hidden") && !expanded) await growToSettings();
-    else { const d = expanded ? lay.expanded : lay.collapsed; await setWindowSize(d.w, d.h, expanded); }
+    else {
+      let d = expanded ? lay.expanded : lay.collapsed;
+      if (lay.id === "taskbar" && !expanded && (state !== "idle" || els.body.classList.contains("flyout-active"))) {
+        d = lay.peek || { w: 380, h: 140 };
+      }
+      await setWindowSize(d.w, d.h, expanded);
+    }
   }
   refreshControls();
 }
 function chooseLayout(id) { const l = getLayout(id); applyLayout(l.id); return l; }
 
+function applyTaskbarSize(size) {
+  const s = size || appearance.taskbarSize;
+  els.body.classList.toggle("tb-compact", s === "compact");
+  if (typeof refreshControls === "function") refreshControls();
+}
+
 applyAppearance();              // persisted skin + palette
-applyLayout(appearance.layout); // persisted layout (body class + window size)
+applyTheme(appearance.theme);   // persisted visual theme style (liquid, nord, white, glass)
+applyLayout(appearance.layout, false); // persisted layout (body class; dockBottomRight handles initial size/position)
+applyTaskbarSize();             // persisted taskbar size (default 32px vs compact 28px)
 
 // Verbal control — appear in every session (pushed into LOCAL_TOOLS below).
 const APPEARANCE_TOOLS = [
@@ -164,21 +198,33 @@ const APPEARANCE_TOOLS = [
   {
     name: "set_theme",
     description:
-      "Change the orb's colour palette/theme. Options: ember (orange), ice (cyan/blue), violet, emerald (green). " +
-      "Use for 'make it blue', 'go violet', 'change the colour', 'theme to green'.",
-    parameters: { type: "object", properties: { theme: { type: "string", description: "Palette name or colour ('blue' -> ice, 'green' -> emerald)." } }, required: ["theme"] },
+      "Change the orb's colour palette or theme style. Themes: glass (dark glass), liquid (liquid glass wallpaper blur), nord (arctic frost), white (pure white monochrome). " +
+      "Palettes: ember (orange), ice (blue), violet, emerald (green), white, nord. " +
+      "Use for 'liquid glass', 'show my wallpaper', 'nord theme', 'make it blue', 'pure white'.",
+    parameters: { type: "object", properties: { theme: { type: "string", description: "Theme style or palette colour ('liquid', 'nord', 'white', 'glass', 'blue' -> ice)." } }, required: ["theme"] },
     handler: async (a) => {
-      const id = resolvePalette(a?.theme);
-      if (!id) return `I don't have a "${a?.theme}" theme. Try: ${PALETTE_ORDER.join(", ")}.`;
-      return `Theme set to ${choosePalette(id).name}.`;
+      const thId = resolveTheme(a?.theme);
+      if (thId && thId !== "glass") {
+        const t = chooseTheme(thId);
+        return `Theme set to ${t.name}.`;
+      }
+      const palId = resolvePalette(a?.theme);
+      if (palId) {
+        return `Theme set to ${choosePalette(palId).name}.`;
+      }
+      if (thId === "glass") {
+        const t = chooseTheme("glass");
+        return `Theme set to ${t.name}.`;
+      }
+      return `I don't have a "${a?.theme}" theme. Try: liquid, nord, white, glass, or a colour like blue/green.`;
     },
   },
   {
     name: "set_layout",
     description:
-      "Change the orb's window LAYOUT/arrangement. Options: dock (compact slab), capsule (sculpted floating glass pill), reactor (arc-reactor HUD frame with ring + telemetry), holodock (angular holographic notched panels). " +
-      "Use for 'change the layout', 'capsule mode', 'reactor frame', 'holographic dock', 'go compact'.",
-    parameters: { type: "object", properties: { layout: { type: "string", description: "Layout name or description ('the pill' -> capsule, 'arc reactor' -> reactor)." } }, required: ["layout"] },
+      "Change the orb's window LAYOUT/arrangement. Options: taskbar (44px minimal taskbar orb with hover flyout), dock (compact slab), capsule (sculpted floating glass pill), reactor (arc-reactor HUD frame with ring + telemetry), holodock (angular holographic notched panels). " +
+      "Use for 'taskbar mode', 'minimal orb', 'capsule mode', 'reactor frame', 'holographic dock', 'go compact'.",
+    parameters: { type: "object", properties: { layout: { type: "string", description: "Layout name or description ('taskbar' -> minimal orb, 'the pill' -> capsule, 'arc reactor' -> reactor)." } }, required: ["layout"] },
     handler: async (a) => {
       const id = resolveLayout(a?.layout);
       if (!id) return `I don't have a "${a?.layout}" layout. Try: ${LAYOUT_ORDER.join(", ")}.`;
@@ -188,8 +234,8 @@ const APPEARANCE_TOOLS = [
 ];
 
 const SETTINGS = {
-  model: "gemini-3.1-flash-live-preview",
-  voice: "Puck",
+  model: DEFAULT_MODEL,
+  voice: DEFAULT_VOICE,
   thinkingLevel: "",  // voxa-config voice.thinkingLevel; "" = model default
   secretsUrl: "http://localhost:3010",
   sources: [
@@ -375,6 +421,28 @@ const store = {
   set autoGain(v) { localStorage.setItem("voxa.autoGain", v ? "1" : "0"); },
   get vadSensitivity() { return localStorage.getItem("voxa.vadSensitivity") || ""; },
   set vadSensitivity(v) { localStorage.setItem("voxa.vadSensitivity", v || ""); },
+  get autoSleepSec() {
+    const v = parseInt(localStorage.getItem("voxa.autoSleepSec"), 10);
+    return Number.isFinite(v) ? v : 35; // default 35 seconds
+  },
+  set autoSleepSec(v) { localStorage.setItem("voxa.autoSleepSec", String(v)); },
+  get taskbarSize() { return appearance.taskbarSize; },
+  set taskbarSize(v) { appearance.taskbarSize = v; },
+  get settingsTab() { return localStorage.getItem("voxa.settingsTab") || "ai"; },
+  set settingsTab(v) { localStorage.setItem("voxa.settingsTab", v || "ai"); },
+  get voice() { return localStorage.getItem("voxa.voice") || SETTINGS.voice || DEFAULT_VOICE; },
+  set voice(v) { localStorage.setItem("voxa.voice", v); SETTINGS.voice = v; updateBrandTooltip(); },
+  get model() { return localStorage.getItem("voxa.model") || SETTINGS.model || DEFAULT_MODEL; },
+  set model(v) { localStorage.setItem("voxa.model", v); SETTINGS.model = v; updateBrandTooltip(); },
+  get discoveredModels() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("voxa.discoveredModels"));
+      return Array.isArray(saved) && saved.length > 0 ? saved : DEFAULT_LIVE_MODELS;
+    } catch { return DEFAULT_LIVE_MODELS; }
+  },
+  set discoveredModels(v) {
+    localStorage.setItem("voxa.discoveredModels", JSON.stringify(v));
+  },
   get expSize() {
     try { return JSON.parse(localStorage.getItem("voxa.expSize")) || EXPANDED_DEFAULT; }
     catch { return EXPANDED_DEFAULT; }
@@ -393,6 +461,45 @@ const store = {
   get summary() { return localStorage.getItem("voxa.summary") || ""; },
   set summary(v) { localStorage.setItem("voxa.summary", v || ""); },
 };
+
+function updateBrandTooltip() {
+  if (els.brand) {
+    els.brand.title = `Voxa · Model: ${store.model} · Voice: ${store.voice}`;
+  }
+}
+
+async function fetchLiveModels(force = false) {
+  const key = store.key || hydratedGeminiKey;
+  if (!key) return store.discoveredModels;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data?.models)) {
+      const live = data.models
+        .filter((m) => {
+          const methods = m.supportedGenerationMethods || [];
+          const name = (m.name || "").toLowerCase();
+          return methods.includes("bidiGenerateContent") || name.includes("live") || name.includes("native-audio");
+        })
+        .map((m) => {
+          const cleanId = (m.name || "").replace(/^models\//, "");
+          return {
+            id: cleanId,
+            name: m.displayName || cleanId,
+            blurb: m.description || "Live audio streaming model",
+          };
+        });
+      if (live.length > 0) {
+        store.discoveredModels = live;
+        return live;
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to fetch live models from Google:", e);
+  }
+  return store.discoveredModels;
+}
 
 // ── Persisted conversation ────────────────────────────────────────────────
 const HISTORY_MAX = 120;        // rolling cap on stored turns
@@ -626,8 +733,13 @@ let lastLvlTick = performance.now();
 function audioLevelLoop(now) {
   requestAnimationFrame(audioLevelLoop);
   let lvl = 0;
-  if (state === "listening") lvl = micLevel;
-  else if (state === "speaking") lvl = session ? Math.min(1, session.getOutputLevel() * 3) : 0;
+  if (state === "listening") {
+    lvl = micLevel;
+    if (lvl > 0.06) touchActivity(); // user speaking keeps session alive
+  } else if (state === "speaking") {
+    lvl = session ? Math.min(1, session.getOutputLevel() * 3) : 0;
+    touchActivity(); // assistant speaking keeps session alive
+  }
   // Decay mic level between frames so the meter falls naturally on silence.
   if (now - lastLvlTick > 40) { micLevel *= 0.82; lastLvlTick = now; }
   // Live mic meter in Settings, so the operator can SEE the gain/NS effect.
@@ -638,6 +750,39 @@ function audioLevelLoop(now) {
   for (let i = 0; i < waveCanvases.length; i++) drawWaveform(waveCanvases[i], waveCtxs[i], i, lvl);
 }
 requestAnimationFrame(audioLevelLoop);
+
+// ── Inactivity Auto-Sleep Controller ─────────────────────────────────────────
+let autoSleepTimer = null;
+let lastActivityTime = Date.now();
+
+function touchActivity() {
+  lastActivityTime = Date.now();
+}
+
+function startAutoSleepCheck() {
+  stopAutoSleepCheck();
+  touchActivity();
+  autoSleepTimer = setInterval(() => {
+    if (state !== "listening" || !session) return;
+    if (observeMode || ambientMode || (SETTINGS.ui.pushToTalk && !pttHeld)) return;
+    const timeoutSec = store.autoSleepSec;
+    if (timeoutSec <= 0) return; // 0 = disabled
+
+    const idleMs = Date.now() - lastActivityTime;
+    if (idleMs >= timeoutSec * 1000) {
+      console.log(`[voxa] Silence timeout reached (${timeoutSec}s), auto-sleeping session to free mic.`);
+      stopAutoSleepCheck();
+      stopSession(false, { preserveLine: true });
+    }
+  }, 1000);
+}
+
+function stopAutoSleepCheck() {
+  if (autoSleepTimer) {
+    clearInterval(autoSleepTimer);
+    autoSleepTimer = null;
+  }
+}
 
 function setState(next) {
   if (!STATES.includes(next)) return;
@@ -764,9 +909,13 @@ function sealTurn() {
 window.Voxa = { get state() { return state; }, setStatus, setLine, setState };
 
 // ── API key (one-time prompt, persisted) ──────────────────────────────────
-function askForKey() {
+async function askForKey() {
+  if (appearance.layout === "taskbar" && !expanded) {
+    els.body.classList.add("flyout-active");
+    if (TAURI) await setWindowSize(380, 140, false).catch(() => {});
+  }
   setStatus("Setup");
-  setLine("");
+  setLine("Paste Gemini API key, press Enter");
   els.key.classList.remove("hidden");
   els.key.focus();
 }
@@ -934,16 +1083,25 @@ async function openSettings() {
   els.settings.classList.remove("hidden");
   els.body.classList.add("settings-open"); // both modes (collapsed grows; expanded hides the feed)
   buildControls();
+  switchSettingsTab(store.settingsTab || "ai");
   refreshControls();
   populateMicSel();
   if (TAURI) await growToSettings();
+  fetchLiveModels().then((models) => {
+    if (models && models.length && controlsBuilt) {
+      rebuildControls();
+    }
+  }).catch(() => {});
 }
 async function closeSettings() {
   els.settings.classList.add("hidden");
   els.body.classList.remove("settings-open");
   if (settingsGrew) {
     settingsGrew = false;
-    const d = expanded ? curLayout().expanded : curLayout().collapsed;
+    let d = expanded ? curLayout().expanded : curLayout().collapsed;
+    if (appearance.layout === "taskbar" && !expanded && (state !== "idle" || isHoveringDock || els.body.classList.contains("flyout-active"))) {
+      d = curLayout().peek || { w: 380, h: 140 };
+    }
     await setWindowSize(d.w, d.h, expanded);
   }
 }
@@ -979,24 +1137,209 @@ function callMode(name, args) {
   const t = AMBIENT_CONTROL_TOOLS.find((x) => x.name === name) || LOCAL_TOOLS.find((x) => x.name === name);
   if (t) Promise.resolve(t.handler(args)).then(() => refreshControls()).catch(() => {});
 }
+let tabsWired = false;
+function wireTabs() {
+  if (tabsWired) return;
+  tabsWired = true;
+  const tabBtns = els.settings.querySelectorAll(".settings-tab");
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchSettingsTab(btn.dataset.tab);
+    });
+  });
+}
+
+function switchSettingsTab(tabId) {
+  const id = tabId || store.settingsTab || "ai";
+  store.settingsTab = id;
+  const tabBtns = els.settings.querySelectorAll(".settings-tab");
+  const tabPanels = els.settings.querySelectorAll(".tab-content");
+  tabBtns.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === id);
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.tab === id);
+  });
+  if (TAURI) growToSettings().catch(() => {});
+}
+
 function rebuildControls() {
-  const old = els.settings.querySelector(".appear");
-  if (old) old.remove();
+  const tabAI = document.getElementById("tabAI");
+  const tabLook = document.getElementById("tabLook");
+  const tabPrefs = document.getElementById("tabPrefs");
+  if (tabAI) {
+    tabAI.querySelectorAll(".appear-row, .active-badge").forEach((e) => e.remove());
+  }
+  if (tabLook) {
+    tabLook.innerHTML = "";
+  }
+  if (tabPrefs) {
+    tabPrefs.querySelectorAll(".appear-row, .appear-hint").forEach((e) => e.remove());
+  }
+  for (const k of Object.keys(modelBtns)) delete modelBtns[k];
+  for (const k of Object.keys(themeBtns)) delete themeBtns[k];
   for (const k of Object.keys(skinBtns)) delete skinBtns[k];
   for (const k of Object.keys(palBtns)) delete palBtns[k];
   for (const k of Object.keys(layBtns)) delete layBtns[k];
+  for (const k of Object.keys(taskbarSizeBtns)) delete taskbarSizeBtns[k];
+  for (const k of Object.keys(voiceBtns)) delete voiceBtns[k];
   for (const k of Object.keys(modeBtns)) delete modeBtns[k];
   for (const k of Object.keys(learnBtns)) delete learnBtns[k];
   for (const k of Object.keys(statsBtns)) delete statsBtns[k];
+  for (const k of Object.keys(sleepBtns)) delete sleepBtns[k];
   learnHintEl = null;
+  activeBadgeEl = null;
+  voiceMoreSelEl = null;
+  customVoiceInputEl = null;
+  customModelInputEl = null;
   controlsBuilt = false;
-  if (!els.settings.classList.contains("hidden")) buildControls();
+  if (!els.settings.classList.contains("hidden")) {
+    buildControls();
+    if (TAURI) growToSettings().catch(() => {});
+  }
 }
+
 function buildControls() {
   if (controlsBuilt) return;
   controlsBuilt = true;
-  const wrap = document.createElement("div");
-  wrap.className = "appear";
+  wireTabs();
+
+  // ── Tab 1: AI & Voice ───────────────────────────────────────────────────
+  // Active status badge: shows live model & voice at a glance
+  const activeBadge = document.createElement("div");
+  activeBadge.className = "active-badge";
+  const activeBadgeInfo = document.createElement("div");
+  activeBadgeInfo.className = "active-badge-info";
+  const activeDot = document.createElement("span");
+  activeDot.className = "active-badge-dot";
+  const activeText = document.createElement("span");
+  activeText.className = "active-badge-text";
+  activeBadgeInfo.append(activeDot, activeText);
+  activeBadge.appendChild(activeBadgeInfo);
+  activeBadgeEl = activeText;
+
+  // Model section: live Gemini audio streaming models + dynamic refresh + custom ID
+  const mdSec = ctlSection("Model");
+  const models = store.discoveredModels;
+  for (const m of models) {
+    const b = ctlChip(m.name, () => {
+      store.model = m.id;
+      setLine(`Model set to ${m.name}`);
+      refreshControls();
+    });
+    b.title = `${m.id}\n${m.blurb || ""}`;
+    modelBtns[m.id] = b;
+    mdSec.body.appendChild(b);
+  }
+  const refreshBtn = ctlChip("↻", async () => {
+    refreshBtn.textContent = "…";
+    setLine("Checking Google for updated live models…");
+    const updated = await fetchLiveModels(true);
+    refreshBtn.textContent = "↻";
+    rebuildControls();
+    setLine(`Discovered ${updated.length} live models`);
+  });
+  refreshBtn.title = "Query Google Gemini API for current live audio models";
+  refreshBtn.classList.add("refresh-btn");
+  mdSec.body.appendChild(refreshBtn);
+
+  const customModel = document.createElement("input");
+  customModel.type = "text";
+  customModel.className = "appear-input";
+  customModel.placeholder = "Custom model ID…";
+  customModel.title = "Enter a custom or newly released Gemini model ID and press Enter";
+  customModel.value = models.some((m) => m.id === store.model) ? "" : store.model;
+  customModel.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const val = customModel.value.trim();
+      if (val) {
+        store.model = val;
+        setLine(`Model set to ${val}`);
+        refreshControls();
+      }
+    }
+  });
+  customModelInputEl = customModel;
+  mdSec.body.appendChild(customModel);
+
+  // Voice section: Quick voices, dropdown with all 30 Google voices, and custom voice text input
+  const vc = ctlSection("Voice");
+  for (const v of QUICK_VOICES) {
+    const b = ctlChip(v.name, () => {
+      store.voice = v.id;
+      setLine(`Voice set to ${v.name}`);
+      refreshControls();
+    });
+    b.title = v.blurb;
+    voiceBtns[v.id] = b;
+    vc.body.appendChild(b);
+  }
+
+  // All 30 Google voices dropdown
+  const voiceMoreSel = document.createElement("select");
+  voiceMoreSel.className = "sel appear-sel";
+  voiceMoreSel.title = "Select from all 30 Google Gemini voices";
+  const defOpt = document.createElement("option");
+  defOpt.value = "";
+  defOpt.textContent = "All 30 voices…";
+  voiceMoreSel.appendChild(defOpt);
+  for (const v of ALL_GEMINI_VOICES) {
+    const opt = document.createElement("option");
+    opt.value = v.id;
+    opt.textContent = `${v.name} (${v.gender === "female" ? "♀" : "♂"} ${v.tone})`;
+    voiceMoreSel.appendChild(opt);
+  }
+  voiceMoreSel.addEventListener("change", () => {
+    if (voiceMoreSel.value) {
+      store.voice = voiceMoreSel.value;
+      setLine(`Voice set to ${voiceMoreSel.value}`);
+      refreshControls();
+    }
+  });
+  voiceMoreSelEl = voiceMoreSel;
+  vc.body.appendChild(voiceMoreSel);
+
+  // Custom voice text input
+  const customVoice = document.createElement("input");
+  customVoice.type = "text";
+  customVoice.className = "appear-input";
+  customVoice.placeholder = "Custom voice…";
+  customVoice.title = "Enter any new Google voice name and press Enter";
+  customVoice.value = ALL_GEMINI_VOICES.some((v) => v.id === store.voice) ? "" : store.voice;
+  customVoice.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const val = customVoice.value.trim();
+      if (val) {
+        store.voice = val;
+        setLine(`Voice set to ${val}`);
+        refreshControls();
+      }
+    }
+  });
+  customVoiceInputEl = customVoice;
+  vc.body.appendChild(customVoice);
+
+  const tabAI = document.getElementById("tabAI");
+  const keyRow = document.getElementById("keyRow");
+  if (tabAI) {
+    if (keyRow) {
+      tabAI.insertBefore(activeBadge, keyRow);
+      tabAI.insertBefore(mdSec.el, keyRow);
+      tabAI.insertBefore(vc.el, keyRow);
+    } else {
+      tabAI.append(activeBadge, mdSec.el, vc.el);
+    }
+  }
+
+  // ── Tab 2: Look & Feel ──────────────────────────────────────────────────
+  const th = ctlSection("Theme");
+  for (const id of THEME_ORDER) {
+    const t = THEMES[id];
+    const b = ctlChip(t.name, () => chooseTheme(id));
+    b.title = t.blurb;
+    themeBtns[id] = b;
+    th.body.appendChild(b);
+  }
 
   const sk = ctlSection("Skin");
   for (const id of SKIN_ORDER) {
@@ -1006,7 +1349,7 @@ function buildControls() {
     sk.body.appendChild(b);
   }
 
-  const pl = ctlSection("Theme");
+  const pl = ctlSection("Accent");
   for (const id of PALETTE_ORDER) {
     const p = PALETTES[id];
     const b = ctlChip("", () => choosePalette(id));
@@ -1027,6 +1370,28 @@ function buildControls() {
     ly.body.appendChild(b);
   }
 
+  const tbSize = ctlSection("Taskbar");
+  const tbSizes = [
+    { id: "default", label: "Standard (32px)", blurb: "Default Windows taskbar icon height (32px)" },
+    { id: "compact", label: "Compact (28px)", blurb: "Ultra-compact taskbar icon height (28px)" },
+  ];
+  for (const opt of tbSizes) {
+    const b = ctlChip(opt.label, () => {
+      store.taskbarSize = opt.id;
+      applyTaskbarSize(opt.id);
+      refreshControls();
+    });
+    b.title = opt.blurb;
+    taskbarSizeBtns[opt.id] = b;
+    tbSize.body.appendChild(b);
+  }
+
+  const tabLook = document.getElementById("tabLook");
+  if (tabLook) {
+    tabLook.append(th.el, sk.el, pl.el, ly.el, tbSize.el);
+  }
+
+  // ── Tab 4: Preferences ──────────────────────────────────────────────────
   const md = ctlSection("Mode");
   modeBtns.ambient = ctlChip("Ambient", () => callMode("set_ambient_mode", { on: !ambientMode }));
   modeBtns.text = ctlChip("Text", () => callMode("set_reply_mode", { mode: replyMode === "text" ? "voice" : "text" }));
@@ -1036,10 +1401,6 @@ function buildControls() {
   modeBtns.observe.title = "Listen-only: take silent notes, no actions";
   md.body.append(modeBtns.ambient, modeBtns.text, modeBtns.observe);
 
-  // Learning: same 3-state dial as the spoken set_learning_mode tool + the
-  // voxa.learningMode localStorage override (config > override > default
-  // auto). Clicking a chip calls set_learning_mode's own handler via callMode,
-  // so voice and the settings window always agree on the effective mode.
   const lr = ctlSection("Learn");
   for (const id of LEARNING_MODE_ORDER) {
     const info = LEARNING_MODES[id];
@@ -1051,9 +1412,6 @@ function buildControls() {
   learnHintEl = document.createElement("div");
   learnHintEl.className = "appear-hint";
 
-  // Stats: which system metrics the strip above the header shows. Chips are a
-  // local display preference; the data source is the system-stats connector,
-  // toggled on/off on the harness like any other connector.
   const st = ctlSection("Stats");
   const statTitles = {
     cpu: "Show CPU usage %", ram: "Show RAM usage %",
@@ -1067,15 +1425,70 @@ function buildControls() {
     st.body.appendChild(b);
   }
 
-  wrap.append(sk.el, pl.el, ly.el, md.el, lr.el, st.el, learnHintEl);
-  els.settings.appendChild(wrap);
+  const as = ctlSection("Sleep");
+  const sleepOpts = [
+    { sec: 15, label: "15s" },
+    { sec: 30, label: "30s" },
+    { sec: 45, label: "45s" },
+    { sec: 60, label: "60s" },
+    { sec: 0,  label: "Never" },
+  ];
+  for (const opt of sleepOpts) {
+    const b = ctlChip(opt.label, () => {
+      store.autoSleepSec = opt.sec;
+      touchActivity();
+      refreshControls();
+    });
+    b.title = opt.sec === 0 ? "Keep mic open indefinitely" : `Auto-stop listening after ${opt.sec}s of silence`;
+    sleepBtns[opt.sec] = b;
+    as.body.appendChild(b);
+  }
+
+  const tabPrefs = document.getElementById("tabPrefs");
+  const memRow = document.getElementById("memRow");
+  if (tabPrefs) {
+    if (memRow) {
+      tabPrefs.insertBefore(md.el, memRow);
+      tabPrefs.insertBefore(lr.el, memRow);
+      tabPrefs.insertBefore(learnHintEl, memRow);
+    } else {
+      tabPrefs.append(md.el, lr.el, learnHintEl);
+    }
+    tabPrefs.append(st.el, as.el);
+  }
+
+  switchSettingsTab(store.settingsTab);
   refreshControls();
 }
+
 function refreshControls() {
   if (!controlsBuilt) return;
+  const curModel = store.model;
+  for (const k of Object.keys(modelBtns)) modelBtns[k]?.classList.toggle("on", curModel === k);
+  if (customModelInputEl) {
+    const isKnown = store.discoveredModels.some((m) => m.id === curModel);
+    customModelInputEl.value = isKnown ? "" : curModel;
+  }
+  const curVoice = store.voice;
+  for (const v of QUICK_VOICES) voiceBtns[v.id]?.classList.toggle("on", curVoice === v.id);
+  if (voiceMoreSelEl) {
+    voiceMoreSelEl.value = ALL_GEMINI_VOICES.some((v) => v.id === curVoice) ? curVoice : "";
+  }
+  if (customVoiceInputEl) {
+    const isKnown = ALL_GEMINI_VOICES.some((v) => v.id === curVoice);
+    customVoiceInputEl.value = isKnown ? "" : curVoice;
+  }
+  if (activeBadgeEl) {
+    activeBadgeEl.textContent = `Active: ${curModel} · Voice: ${curVoice}`;
+  }
+  for (const id of THEME_ORDER) themeBtns[id]?.classList.toggle("on", appearance.theme === id);
   for (const id of SKIN_ORDER) skinBtns[id]?.classList.toggle("on", appearance.skin === id);
   for (const id of PALETTE_ORDER) palBtns[id]?.classList.toggle("on", appearance.palette === id);
   for (const id of LAYOUT_ORDER) layBtns[id]?.classList.toggle("on", appearance.layout === id);
+  const curTbSize = store.taskbarSize;
+  for (const k of Object.keys(taskbarSizeBtns)) {
+    taskbarSizeBtns[k]?.classList.toggle("on", curTbSize === k);
+  }
   modeBtns.ambient?.classList.toggle("on", !!ambientMode);
   modeBtns.text?.classList.toggle("on", replyMode === "text");
   modeBtns.observe?.classList.toggle("on", !!observeMode);
@@ -1083,6 +1496,8 @@ function refreshControls() {
   for (const id of LEARNING_MODE_ORDER) learnBtns[id]?.classList.toggle("on", activeLearnMode === id);
   const selStats = sysStatsPref.list;
   for (const id of SYS_METRIC_ORDER) statsBtns[id]?.classList.toggle("on", selStats.includes(id));
+  const curSleep = store.autoSleepSec;
+  for (const s of [15, 30, 45, 60, 0]) sleepBtns[s]?.classList.toggle("on", curSleep === s);
   if (learnHintEl) {
     const base = "Auto: learns from every conversation · Explicit: only when you ask · Off: no automatic learning.";
     const tail = store.summary ? store.summary.replace(/\s+/g, " ").trim().slice(-70) : "";
@@ -1098,16 +1513,18 @@ async function setWindowSize(w, h, resizable) {
   try {
     // Work in PHYSICAL pixels throughout. Mixing logical coords with a single
     // scale factor breaks on multi-monitor layouts (different DPI, negative or
-    // offset origins) and could fling the orb onto another screen. WHY: the old
-    // Math.max(8, …) clamp assumed the primary monitor started at (0,0).
+    // offset origins) and could fling the orb onto another screen.
     const sf = await win.scaleFactor();
     const pos = await win.outerPosition();   // physical, virtual-desktop space
     const inner = await win.innerSize();      // physical
     const targetW = Math.round(w * sf);
     const targetH = Math.round(h * sf);
-    // Anchor the BOTTOM edge: grow upward by the physical height delta.
+    // Anchor the BOTTOM-RIGHT edge: grow upward by physical height delta,
+    // and grow leftward by physical width delta when in taskbar layout so the orb
+    // stays pinned at the same screen coordinates.
+    const dxPhys = targetW - inner.width;
     const dyPhys = targetH - inner.height;
-    let nx = pos.x;
+    let nx = appearance.layout === "taskbar" ? pos.x - dxPhys : pos.x;
     let ny = pos.y - dyPhys;
     // Keep the window on the monitor it currently lives on.
     const mon = await currentMonitor();
@@ -1117,8 +1534,7 @@ async function setWindowSize(w, h, resizable) {
       const left = mon.position.x;
       const right = mon.position.x + mon.size.width;
       ny = Math.max(top, ny);
-      nx = Math.min(nx, right - targetW);
-      nx = Math.max(nx, left);
+      nx = Math.max(left, Math.min(nx, right - targetW));
     }
     await win.setResizable(!!resizable);
     await win.setSize(new PhysicalSize(targetW, targetH));
@@ -1150,7 +1566,10 @@ async function toggleExpand() {
     await setWindowSize(s.w, s.h, true);
     els.feed.scrollTop = els.feed.scrollHeight;
   } else {
-    const c = curLayout().collapsed;
+    let c = curLayout().collapsed;
+    if (appearance.layout === "taskbar" && (state !== "idle" || isHoveringDock || els.body.classList.contains("flyout-active"))) {
+      c = curLayout().peek || { w: 380, h: 140 };
+    }
     await setWindowSize(c.w, c.h, false);
   }
 }
@@ -2117,7 +2536,10 @@ async function viewportRenderShell(kind, value) {
 // X-Frame-Options wall). Recreated per URL — JS can't navigate an existing Tauri
 // webview; persistent in-place navigation is the Rust-backed Phase-3 follow-up.
 async function viewportShowUrl(url) {
-  if (!TAURI) return "The viewport needs the desktop app.";
+  if (!TAURI) {
+    try { window.open(url, "_blank"); return "Opened in a new browser tab."; } catch {}
+    return "The viewport needs the desktop app.";
+  }
   const WebviewWindow = getWebviewWindow();
   if (!WebviewWindow) return "Viewport unavailable (Tauri webviewWindow API missing).";
   try {
@@ -2262,6 +2684,11 @@ async function startSession() {
   if (provider === "gemini" && !apiKey) { starting = false; return askForKey(); }
   if (provider === "openai" && !apiKey) { starting = false; setState("idle"); setLine("Set an OpenAI API key in Settings."); return; }
 
+  if (appearance.layout === "taskbar" && !expanded) {
+    els.body.classList.add("flyout-active");
+    if (TAURI) await setWindowSize(380, 140, false);
+  }
+
   setState("connecting");
   setStatus("Connecting");
   setLine("…");
@@ -2310,8 +2737,8 @@ async function startSession() {
   const Provider = provider === "openai" ? OpenAiSession : provider === "daemon" ? DaemonSession : GeminiSession;
   session = new Provider({
     apiKey,
-    model: provider === "openai" ? (SETTINGS.openaiModel || "gpt-realtime") : SETTINGS.model,
-    voice: provider === "openai" ? (SETTINGS.openaiVoice || "marin") : SETTINGS.voice,
+    model: provider === "openai" ? (SETTINGS.openaiModel || "gpt-realtime") : (store.model || SETTINGS.model),
+    voice: provider === "openai" ? (SETTINGS.openaiVoice || "marin") : (store.voice || SETTINGS.voice),
     daemonUrl: SETTINGS.daemonUrl,
     thinkingLevel: SETTINGS.thinkingLevel,
     systemInstruction: SETTINGS.systemInstruction + (focusEnabled() ? FOCUS_GUIDE : "") + conversationContext() + (recallBlock ? "\n\n" + recallBlock : ""),
@@ -2330,6 +2757,7 @@ async function startSession() {
         }
         if (!s) return;
         if (s === "listening") {
+          touchActivity();
           if (state === "speaking") sealTurn();
           setState("listening");
           setMusicDuck(false); // restore music volume after Voxa finishes
@@ -2352,8 +2780,8 @@ async function startSession() {
           // Deliver any proactive alerts (timers/reminders) that fired while the
           // session was closed/connecting — now that it's live, speak them.
           flushAlerts();
-        } else if (s === "speaking") { setState("speaking"); setMusicDuck(true); setStatus("Speaking"); }
-        else if (s === "connecting") { setState("connecting"); setStatus("Connecting"); }
+        } else if (s === "speaking") { touchActivity(); setState("speaking"); setMusicDuck(true); setStatus("Speaking"); }
+        else if (s === "connecting") { touchActivity(); setState("connecting"); setStatus("Connecting"); }
         else if (s === "offline") {
           const message = detail ? `Gemini session closed: ${detail}` : "Gemini session closed";
           showSessionError(message);
@@ -2365,9 +2793,10 @@ async function startSession() {
           }
         }
       },
-      userText: (t) => { setLine(t, "user"); streamMsg("user", t); },
-      assistantText: (t) => { setLine(t); streamMsg("bot", t); },
+      userText: (t) => { touchActivity(); setLine(t, "user"); streamMsg("user", t); },
+      assistantText: (t) => { touchActivity(); setLine(t); streamMsg("bot", t); },
       tool: (name, args, phase, info) => {
+        touchActivity();
         if (phase === "running") { setStatus(`Tool · ${name}`); addMsg("tool", `⚙ ${name}`); }
         else {
           addMsg("tool", phase === "error" ? `✕ ${name} — ${String(info).slice(0, 80)}` : `✓ ${name}`);
@@ -2396,6 +2825,7 @@ async function startSession() {
   try {
     await session.start();
     starting = false;
+    startAutoSleepCheck();
   } catch (e) {
     showSessionError(describeError(e));
     if (isAuthError(lastSessionError)) {
@@ -2439,7 +2869,8 @@ function stopSession(fromCallback = false, opts = {}) {
 }
 
 function teardownSession(fromCallback = false, opts = {}) {
-  if (session && !fromCallback) { try { session.stop(); } catch {} }
+  stopAutoSleepCheck();
+  if (session) { try { session.stop(); } catch {} }
   session = null;
   starting = false;
   sealTurn();
@@ -2451,6 +2882,9 @@ function teardownSession(fromCallback = false, opts = {}) {
   setStatus("Idle");
   if (!opts.preserveLine && (!els.line.textContent || els.line.textContent === "…")) {
     setLine("Tap the orb to start");
+  }
+  if (appearance.layout === "taskbar") {
+    scheduleTaskbarCollapse();
   }
 }
 
@@ -2464,6 +2898,7 @@ els.orb.addEventListener("click", () => {
 // session first and queue the text once it connects.
 let pendingText = "";
 function sendComposer() {
+  touchActivity();
   const text = els.composerInput.value.trim();
   if (!text) return;
   els.composerInput.value = "";
@@ -2479,6 +2914,7 @@ function sendComposer() {
 }
 els.send.addEventListener("click", sendComposer);
 els.composerInput.addEventListener("keydown", (e) => {
+  touchActivity();
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendComposer(); }
 });
 
@@ -2580,31 +3016,183 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// ── Taskbar minimal hover-to-peek & Context Menu ───────────────────────────
+let isHoveringDock = false;
+let taskbarCollapseTimer = null;
+const dockEl = document.querySelector(".dock");
+
+function scheduleTaskbarCollapse() {
+  if (taskbarCollapseTimer) clearTimeout(taskbarCollapseTimer);
+  taskbarCollapseTimer = setTimeout(async () => {
+    taskbarCollapseTimer = null;
+    if (appearance.layout !== "taskbar") return;
+    if (isHoveringDock) return;
+    if (state !== "idle") return;
+    if (expanded) return;
+    if (!els.settings.classList.contains("hidden")) return;
+    if (els.contextMenu && !els.contextMenu.classList.contains("hidden")) return;
+
+    els.body.classList.remove("flyout-active");
+    if (TAURI) await setWindowSize(56, 56, false);
+  }, 400);
+}
+
+if (dockEl) {
+  dockEl.addEventListener("pointerenter", async () => {
+    isHoveringDock = true;
+    if (taskbarCollapseTimer) {
+      clearTimeout(taskbarCollapseTimer);
+      taskbarCollapseTimer = null;
+    }
+    if (appearance.layout === "taskbar" && !expanded) {
+      els.body.classList.add("flyout-active");
+      if (TAURI) await setWindowSize(380, 140, false);
+    }
+  });
+
+  dockEl.addEventListener("pointerleave", () => {
+    isHoveringDock = false;
+    scheduleTaskbarCollapse();
+  });
+}
+
+function hideContextMenu() {
+  if (els.contextMenu && !els.contextMenu.classList.contains("hidden")) {
+    els.contextMenu.classList.add("hidden");
+    if (appearance.layout === "taskbar" && state === "idle" && !expanded && els.settings.classList.contains("hidden") && !isHoveringDock) {
+      scheduleTaskbarCollapse();
+    }
+  }
+}
+
+els.orb.addEventListener("contextmenu", async (e) => {
+  e.preventDefault();
+  if (els.ctxTalkLabel) {
+    els.ctxTalkLabel.textContent = state === "idle" ? "Start conversation" : "Stop conversation";
+  }
+  if (appearance.layout === "taskbar" && !expanded) {
+    els.body.classList.add("flyout-active");
+    if (TAURI) await setWindowSize(380, 280, false);
+  }
+  const menu = els.contextMenu;
+  if (!menu) return;
+  menu.classList.remove("hidden");
+
+  if (appearance.layout === "taskbar") {
+    menu.style.bottom = "64px";
+    menu.style.right = "12px";
+    menu.style.left = "auto";
+    menu.style.top = "auto";
+  } else {
+    const mw = 200, mh = 220;
+    let x = e.clientX;
+    let y = e.clientY - mh;
+    if (y < 8) y = e.clientY + 8;
+    if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+    if (x < 8) x = 8;
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.bottom = "auto";
+    menu.style.right = "auto";
+  }
+});
+
+els.contextMenu?.addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-action]");
+  if (!item) return;
+  const action = item.getAttribute("data-action");
+  hideContextMenu();
+
+  switch (action) {
+    case "toggle-talk":
+      if (state === "idle") startSession();
+      else stopSession();
+      break;
+    case "theme-liquid":
+      chooseTheme("liquid");
+      break;
+    case "theme-nord":
+      chooseTheme("nord");
+      break;
+    case "theme-white":
+      chooseTheme("white");
+      break;
+    case "theme-glass":
+      chooseTheme("glass");
+      break;
+    case "lay-taskbar":
+      chooseLayout("taskbar");
+      break;
+    case "lay-dock":
+      chooseLayout("dock");
+      break;
+    case "lay-capsule":
+      chooseLayout("capsule");
+      break;
+    case "lay-reactor":
+      chooseLayout("reactor");
+      break;
+    case "lay-holodock":
+      chooseLayout("holodock");
+      break;
+    case "settings":
+      if (els.settings.classList.contains("hidden")) await openSettings();
+      else await closeSettings();
+      break;
+    case "close":
+      els.close.click();
+      break;
+  }
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (els.contextMenu && !els.contextMenu.classList.contains("hidden")) {
+    if (!els.contextMenu.contains(e.target) && !els.orb.contains(e.target)) {
+      hideContextMenu();
+    }
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (els.contextMenu && !els.contextMenu.classList.contains("hidden")) {
+      hideContextMenu();
+    } else if (!els.settings.classList.contains("hidden")) {
+      closeSettings();
+    }
+  }
+});
+
 // ── Window placement: dock bottom-right, then reveal ──────────────────────
 async function dockBottomRight() {
   if (!TAURI) return;
-  const { getCurrentWindow, currentMonitor, PhysicalPosition } = TAURI.window;
+  const { getCurrentWindow, currentMonitor, PhysicalPosition, PhysicalSize } = TAURI.window;
   const win = getCurrentWindow();
   const place = async () => {
     let mon = null;
-    for (let i = 0; i < 12 && !mon; i++) {
+    for (let i = 0; i < 20 && !mon; i++) {
       try { mon = await currentMonitor(); } catch {}
-      if (!mon) await new Promise((r) => setTimeout(r, 50));
+      if (!mon) await new Promise((r) => setTimeout(r, 100));
     }
     if (!mon) return false;
     const sf = mon.scaleFactor || 1;
-    const margin = Math.round(24 * sf);
+    const margin = appearance.layout === "taskbar" ? Math.round(12 * sf) : Math.round(24 * sf);
     const taskbar = Math.round(56 * sf);
     const w = Math.round(curLayout().collapsed.w * sf);
     const h = Math.round(curLayout().collapsed.h * sf);
     const x = mon.position.x + Math.max(0, mon.size.width - w - margin);
     const y = mon.position.y + Math.max(0, mon.size.height - h - taskbar);
-    try { await win.setPosition(new PhysicalPosition(x, y)); return true; }
+    try {
+      await win.setSize(new PhysicalSize(w, h));
+      await win.setPosition(new PhysicalPosition(x, y));
+      return true;
+    }
     catch (e) { console.warn("dock failed", e); return false; }
   };
-  await place();      // try while hidden (no flash if it works)
-  await win.show();   // reveal
-  await place();      // and again after show — the window now has a monitor
+  // On Windows, currentMonitor() returns null for a hidden window.
+  // Show the window first so Windows assigns it to a monitor, then position it.
+  try { await win.show(); } catch (e) { console.warn("show failed", e); }
+  await place();
 }
 
 dockBottomRight();

@@ -4,7 +4,9 @@
   "version": "1.5.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "preview": "node serve.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
