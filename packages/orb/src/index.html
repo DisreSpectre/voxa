@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="styles.css" />
     <title>Orb</title>
   </head>
-  <body class="idle">
+  <body class="idle lay-taskbar">
     <div class="dock">
       <button id="orb" class="orb" aria-label="Toggle listening">
         <canvas id="orbCanvas" class="orb-canvas"></canvas>
@@ -15,43 +15,70 @@
       <div class="panel" data-tauri-drag-region>
         <div id="sysstats" class="sysstats hidden" data-tauri-drag-region title="System stats"></div>
         <div class="top" data-tauri-drag-region>
+          <button id="btnBack" class="ib back-btn hidden" title="Back to Orb" aria-label="Back to Orb">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          </button>
           <span id="status" class="status" data-tauri-drag-region>Idle</span>
           <canvas id="wave" class="wave" width="60" height="20" aria-hidden="true"></canvas>
           <span class="brand" id="brand" data-tauri-drag-region></span>
-          <button id="gear" class="ib" title="Settings" aria-label="Settings">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-          <button id="expand" class="ib" title="Expand conversation" aria-label="Expand conversation">
-            <svg class="ic-expand" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <button id="close" class="ib x" title="Close" aria-label="Close">×</button>
+          <div class="top-actions">
+            <button id="gear" class="ib" title="Settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button id="expand" class="ib" title="Open chat" aria-label="Open chat">
+              <svg class="ic-chat" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+            <button id="close" class="ib min-btn" title="Minimize to tray" aria-label="Minimize to tray">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
         </div>
 
         <div id="line" class="line" data-tauri-drag-region>Tap the orb to start</div>
-
-        <div id="nowplaying" class="nowplaying hidden" data-tauri-drag-region title="Now playing">
-          <span id="npIcon" class="np-ico" aria-hidden="true"></span>
-          <span id="npText" class="np-text"></span>
-        </div>
 
         <div id="feed" class="feed hidden" aria-live="polite"></div>
 
         <div id="settings" class="settings hidden">
           <div class="settings-tabs" role="tablist">
             <button class="settings-tab active" data-tab="ai" role="tab" type="button">AI &amp; Voice</button>
-            <button class="settings-tab" data-tab="look" role="tab" type="button">Look &amp; Feel</button>
+            <button class="settings-tab" data-tab="look" role="tab" type="button">Theme</button>
             <button class="settings-tab" data-tab="audio" role="tab" type="button">Audio &amp; Mic</button>
-            <button class="settings-tab" data-tab="prefs" role="tab" type="button">Preferences</button>
           </div>
 
           <div id="tabAI" class="tab-content active" data-tab="ai" role="tabpanel">
-            <label id="keyRow" class="set-row">
+            <label class="set-row">
               <span class="set-l">Key</span>
-              <button id="rekey" class="link">change API key…</button>
+              <input id="keyInput" class="sel" type="password" placeholder="Paste Gemini key &amp; press Enter" autocomplete="off" />
+            </label>
+            <label class="set-row">
+              <span class="set-l">Model</span>
+              <select id="modelSel" class="sel">
+                <option value="gemini-2.5-flash-native-audio-preview">Gemini 2.5 Flash Audio</option>
+                <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live</option>
+                <option value="gemini-3.8-live">Gemini 3.8 Live</option>
+              </select>
+            </label>
+            <label class="set-row">
+              <span class="set-l">Voice</span>
+              <select id="voiceSel" class="sel">
+                <option value="Aoede">Aoede (Default / Warm)</option>
+                <option value="Pore">Pore (Calm)</option>
+                <option value="Kore">Kore (Clear)</option>
+                <option value="Fenrir">Fenrir (Deep)</option>
+                <option value="Zephyr">Zephyr (Bright)</option>
+              </select>
             </label>
           </div>
 
-          <div id="tabLook" class="tab-content" data-tab="look" role="tabpanel"></div>
+          <div id="tabLook" class="tab-content" data-tab="look" role="tabpanel">
+            <label class="set-row">
+              <span class="set-l">Theme</span>
+              <select id="themeSel" class="sel">
+                <option value="black">Black (White Accent)</option>
+                <option value="nord">Nord (Nord Blue Accent)</option>
+              </select>
+            </label>
+          </div>
 
           <div id="tabAudio" class="tab-content" data-tab="audio" role="tabpanel">
             <label class="set-row">
@@ -92,16 +119,7 @@
               </select>
             </label>
           </div>
-
-          <div id="tabPrefs" class="tab-content" data-tab="prefs" role="tabpanel">
-            <label id="memRow" class="set-row">
-              <span class="set-l">Memory</span>
-              <button id="clearMem" class="link">clear conversation memory</button>
-            </label>
-          </div>
         </div>
-
-        <input id="key" class="key hidden" type="password" placeholder="Paste Gemini API key, press Enter" autocomplete="off" spellcheck="false" />
 
         <!-- Live input area — only shown in the expanded chat view -->
         <div id="composer" class="composer hidden">
@@ -127,24 +145,18 @@
       <div class="ctx-sub">
         <div class="ctx-item"><span class="ctx-ico">🎨</span><span>Theme</span><span class="ctx-arr">›</span></div>
         <div class="ctx-sub-menu">
-          <div class="ctx-item" data-action="theme-liquid">💧 Liquid Glass</div>
-          <div class="ctx-item" data-action="theme-nord">❄️ Nord Arctic</div>
-          <div class="ctx-item" data-action="theme-white">⚪ Pure White</div>
-          <div class="ctx-item" data-action="theme-glass">🌌 Dark Glass</div>
+          <div class="ctx-item" data-action="theme-black">⚫ Black (White Accent)</div>
+          <div class="ctx-item" data-action="theme-nord">❄️ Nord (Nord Blue Accent)</div>
         </div>
       </div>
-      <div class="ctx-sub">
-        <div class="ctx-item"><span class="ctx-ico">📐</span><span>Layout</span><span class="ctx-arr">›</span></div>
-        <div class="ctx-sub-menu">
-          <div class="ctx-item" data-action="lay-taskbar">📌 Taskbar Minimal</div>
-          <div class="ctx-item" data-action="lay-dock">📦 Classic Dock</div>
-          <div class="ctx-item" data-action="lay-capsule">💊 Capsule</div>
-          <div class="ctx-item" data-action="lay-reactor">⚛️ Reactor</div>
-          <div class="ctx-item" data-action="lay-holodock">📐 Holo Dock</div>
-        </div>
+      <div class="ctx-item" data-action="toggle-stealth">
+        <span class="ctx-ico">👻</span><span id="ctxStealthLabel">Auto-hide Orb (Off)</span>
       </div>
       <div class="ctx-item" data-action="settings">
         <span class="ctx-ico">⚙️</span><span>Settings…</span>
+      </div>
+      <div class="ctx-item" data-action="reset-pos">
+        <span class="ctx-ico">📍</span><span>Reset Position to Bottom-Right</span>
       </div>
       <div class="ctx-sep"></div>
       <div class="ctx-item" data-action="close">

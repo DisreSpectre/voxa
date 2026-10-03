@@ -1,0 +1,17 @@
+# Static assets and icons
+**/src-tauri/icons/**
+docs/assets/**
+packages/orb/src/assets/**
+*.png
+*.ico
+*.icns
+*.svg
+
+# Build artifacts & temp outputs
+target/
+dist/
+build/
+*.log
+
+# Sensitive or noisy data
+packages/harness/data/**

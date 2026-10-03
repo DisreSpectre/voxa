@@ -208,6 +208,23 @@ fn enable_linux_media(app: &tauri::App) {
     });
 }
 
+#[tauri::command]
+fn register_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let _ = app.global_shortcut().unregister_all();
+    let trimmed = shortcut_str.trim();
+    if !trimmed.is_empty() {
+        let sc = trimmed.parse::<Shortcut>().map_err(|e| e.to_string())?;
+        app.global_shortcut().register(sc).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -224,6 +241,21 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state() == ShortcutState::Pressed {
+                        use tauri::{Emitter, Manager};
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                            let _ = win.emit("global-shortcut", ());
+                        }
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             use tauri::Manager;
             // Linux: wire WebKitGTK's media-stream gates open (mic). No-op elsewhere.
@@ -231,13 +263,64 @@ pub fn run() {
             enable_linux_media(app);
             // Voxa one-file launch: the orb supervises the local connector harness.
             start_harness(app.handle());
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
+            // JS will position the window at the taskbar dock and then call win.show()
+            use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+            if let Ok(shortcut) = "CommandOrControl+Space".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(shortcut);
+            }
+            use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
+            use tauri::menu::{Menu, MenuItem};
+
+            let show_i = MenuItem::with_id(app, "show", "Show Orb", true, None::<&str>)?;
+            let toggle_i = MenuItem::with_id(app, "toggle", "Toggle Session", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &toggle_i, &quit_i])?;
+
+            if let Some(icon) = app.default_window_icon() {
+                let _ = TrayIconBuilder::new()
+                    .icon(icon.clone())
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        match event.id.as_ref() {
+                            "show" => {
+                                if let Some(win) = app.get_webview_window("main") {
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                }
+                            }
+                            "toggle" => {
+                                use tauri::Emitter;
+                                if let Some(win) = app.get_webview_window("main") {
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                    let _ = win.emit("global-shortcut", ());
+                                }
+                            }
+                            "quit" => {
+                                app.exit(0);
+                            }
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                            let app = tray.app_handle();
+                            if let Some(win) = app.get_webview_window("main") {
+                                if win.is_visible().unwrap_or(false) {
+                                    let _ = win.hide();
+                                } else {
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(app);
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, read_local_config, write_local_config, viewport_eval, brain_dir, open_brain_folder])
+        .invoke_handler(tauri::generate_handler![greet, read_local_config, write_local_config, viewport_eval, brain_dir, open_brain_folder, register_shortcut, quit_app])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app, event| {

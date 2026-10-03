@@ -132,6 +132,22 @@ export class PcmPlayer {
     return this.ctx;
   }
 
+  unlock() {
+    try {
+      const ctx = this._ensureCtx();
+      if (ctx && ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      if (ctx) {
+        const silent = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = silent;
+        src.connect(ctx.destination);
+        src.start();
+      }
+    } catch {}
+  }
+
   // 0..1 RMS of whatever is currently playing — 0 when idle/silent. Reading is
   // cheap; safe to call every animation frame.
   getLevel() {
@@ -185,6 +201,17 @@ export class PcmPlayer {
     }
     this.firstFrame = true;
     if (this.ctx) this.nextStart = this.ctx.currentTime;
+  }
+
+  close() {
+    this.stop();
+    try {
+      if (this.ctx && this.ctx.state !== "closed") {
+        this.ctx.close();
+      }
+    } catch {}
+    this.ctx = null;
+    this.analyser = null;
   }
 
   get playing() { return this.sources.length > 0; }

@@ -14,7 +14,6 @@
 
 import { GoogleGenAI, Modality } from "https://esm.run/@google/genai";
 import { MicCapture, PcmPlayer, int16ToBase64, base64ToInt16 } from "./audio.js";
-import { buildMemoryGuide } from "./memory-guide.mjs";
 
 const GEMINI_OUTPUT_RATE = 24000;
 
@@ -49,18 +48,11 @@ function clampToolResponse(out) {
 // tools a given build doesn't ship.
 export const TOOL_GUIDE =
   "\n\nYou are wired to live tools. When the operator asks about anything a " +
-  "tool covers — projects, tasks, agents, system state, terminals, or the UI — " +
-  "CALL THE RELEVANT TOOL instead of guessing, e.g. list_projects/list_tasks " +
-  "for work items. Prefer acting via tools over saying you can't. IMPORTANT: " +
+  "tool covers — web search, current news, weather forecasts, system resource statistics, or UI theme switching — " +
+  "CALL THE RELEVANT TOOL instead of guessing. Prefer acting via tools over saying you can't. IMPORTANT: " +
   "tool calls take a moment — BEFORE you call one, say a short spoken heads-up " +
   "so the operator isn't left waiting, e.g. \"one sec, checking that…\" or " +
-  "\"hold on, pulling that up.\" Then call the tool and report what you found." +
-  "\n\nCONVERSATION MEMORY: your chat with the operator PERSISTS across sessions — " +
-  "earlier context is provided to you at the start of each session. When the talk " +
-  "gets long, or the operator says \"compact\"/\"summarize and clear\", or you want " +
-  "to checkpoint important threads before they scroll away, call compact_conversation " +
-  "with a concise summary of the decisions, facts, and open threads to remember. " +
-  "That summary becomes your durable memory and the on-screen history is cleared.";
+  "\"hold on, pulling that up.\" Then call the tool and report what you found.";
 
 // The ~98 MCP brain tools carry zod-to-json-schema output (unions/anyOf, $ref,
 // type-less nodes, arrays without items, extra keywords). Gemini's schema
@@ -189,16 +181,11 @@ export class GeminiSession {
     }
     if (fnDecls.length) tools = [{ functionDeclarations: fnDecls }];
 
-    // Memory guidance is derived from the tools actually loaded (bridge +
-    // local; just local names when there's no bridge, e.g. observe mode), so
-    // the model is only ever told about memory tools that exist in this build.
-    const memoryGuide = buildMemoryGuide(fnDecls.map((d) => d.name));
-
     this.session = await this.ai.live.connect({
       model: this.model,
       config: {
         responseModalities: [Modality.AUDIO],
-        systemInstruction: this.systemInstruction + ((this.toolBridge || this.localTools.length) ? TOOL_GUIDE : "") + memoryGuide + (this.extraInstruction || ""),
+        systemInstruction: this.systemInstruction + ((this.toolBridge || this.localTools.length) ? TOOL_GUIDE : "") + (this.extraInstruction || ""),
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: this.voice } },
         },
@@ -255,7 +242,7 @@ export class GeminiSession {
           });
         } catch (e) { this.on.error(e?.message || String(e)); }
       },
-      onLevel: (lvl) => this.on.status(undefined, undefined, lvl),
+      onLevel: (lvl) => { if (this.on.level) this.on.level(lvl); },
     });
     try {
       await this.mic.start();
@@ -443,7 +430,7 @@ export class GeminiSession {
   stop() {
     this.active = false;
     try { this.mic && this.mic.stop(); } catch {}
-    try { this.player.stop(); } catch {}
+    try { this.player && (this.player.close ? this.player.close() : this.player.stop()); } catch {}
     try { this.session && this.session.close(); } catch {}
     this.mic = null;
     this.session = null;

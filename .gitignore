@@ -5,9 +5,26 @@ node_modules/
 **/dist/
 **/build/
 **/gen/
+.venv/
+venv/
 # harness runtime state holds connector configs + secrets
 **/data/
 **/state*.json
 **/.env*
+**/*.env
 **/*.local.*
+**/*config.json
+**/*.key
+**/*.pem
+**/*.cert
+**/*.secret
 .DS_Store
+*.log
+
+# SigMap generated context & signature files
+.context/
+AGENTS.md
+.github/copilot-instructions.md
+
+# Knowledge graph generated outputs
+graphify-out/

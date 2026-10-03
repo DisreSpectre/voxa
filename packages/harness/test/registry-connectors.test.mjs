@@ -13,7 +13,7 @@ test("loadConnectors loads all connectors in connectors directory", async () => 
 test("all connectors have valid manifests and schemas", async () => {
   await loadConnectors();
   const list = allConnectors();
-  assert.ok(list.length >= 10, `Expected at least 10 connectors, found ${list.length}`);
+  assert.equal(list.length, 3, `Expected exactly 3 streamlined connectors, found ${list.length}`);
 
   for (const c of list) {
     assert.ok(c.id && typeof c.id === "string", `Connector must have an id`);

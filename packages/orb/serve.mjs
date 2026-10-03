@@ -83,7 +83,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`\n🔮 Voxa Orb Web Preview: http://localhost:${PORT}`);
-  console.log(`🔌 Connectors & Web Search: http://localhost:3010`);
+  console.log(`\n🔮 Voxa Orb Web Preview: http://localhost:${PORT} (or http://127.0.0.1:${PORT})`);
+  console.log(`🔌 Connectors & Web Search: http://localhost:3010 (or http://127.0.0.1:3010)`);
   console.log(`Press Ctrl+C to stop.\n`);
 });

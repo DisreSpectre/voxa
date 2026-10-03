@@ -1,0 +1,50 @@
+# Virtual environments & dependencies
+.venv/
+venv/
+node_modules/
+**/node_modules/
+
+# Build outputs & compilers (Rust/Tauri/Node)
+target/
+**/target/
+dist/
+**/dist/
+build/
+**/build/
+gen/
+**/gen/
+
+# Heavy knowledge graph raw dumps & visualizers (queried via graphify CLI/MCP instead)
+graphify-out/graph.json
+graphify-out/graph.html
+graphify-out/cache/
+graphify-out/20*/
+
+# Binary & media assets (high token cost, no semantic text benefit)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.icns
+*.svg
+*.wasm
+*.wav
+*.mp3
+*.ogg
+
+# Massive lockfiles (prevents accidental context slurping)
+package-lock.json
+Cargo.lock
+
+# Runtime state, cache, logs & secrets
+*.log
+.DS_Store
+**/.env*
+**/*.key
+**/*.pem
+**/*.cert
+**/data/
+**/state*.json
+.context/
+
