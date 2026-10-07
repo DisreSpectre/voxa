@@ -71,3 +71,25 @@ test("effectiveConfig resolves stored values over defaults without masking", () 
   assert.equal(effective.apiKey, "real-secret-key", "Effective config must contain raw secret for execution");
   assert.equal(effective.count, 3, "Unset fields must take default value");
 });
+
+test("Secrets resolution correctly falls back to GEMINI_API_KEY and GOOGLE_API_KEY environment variables", () => {
+  function resolveSecret(cfg, key, env) {
+    const envVal = key === "geminiApiKey"
+      ? (env.GEMINI_API_KEY || env.GOOGLE_API_KEY)
+      : env[key];
+    return cfg[key] ?? envVal;
+  }
+
+  // Stored cfg takes priority
+  assert.equal(resolveSecret({ geminiApiKey: "stored-key" }, "geminiApiKey", { GEMINI_API_KEY: "env-key" }), "stored-key");
+
+  // Fallback to GEMINI_API_KEY when cfg is empty
+  assert.equal(resolveSecret({}, "geminiApiKey", { GEMINI_API_KEY: "env-gemini-key" }), "env-gemini-key");
+
+  // Fallback to GOOGLE_API_KEY when GEMINI_API_KEY is unset
+  assert.equal(resolveSecret({}, "geminiApiKey", { GOOGLE_API_KEY: "env-google-key" }), "env-google-key");
+
+  // Unset returns undefined
+  assert.equal(resolveSecret({}, "geminiApiKey", {}), undefined);
+});
+

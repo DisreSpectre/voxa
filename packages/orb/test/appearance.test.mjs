@@ -122,5 +122,5 @@ test("Voices and Models catalogs are intact", () => {
   assert.ok(ALL_GEMINI_VOICES.length >= 20);
   assert.equal(DEFAULT_VOICE, "Aoede");
   assert.ok(DEFAULT_LIVE_MODELS.length >= 2);
-  assert.equal(DEFAULT_MODEL, "gemini-3.1-flash-live-preview");
+  assert.equal(DEFAULT_MODEL, "gemini-3.8-live");
 });

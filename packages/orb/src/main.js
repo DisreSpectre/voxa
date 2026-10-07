@@ -31,6 +31,9 @@ const els = {
   settings: document.getElementById("settings"),
   themeSel: document.getElementById("themeSel"),
   keyInput: document.getElementById("keyInput"),
+  keyInputBackup: document.getElementById("keyInputBackup"),
+  tavilyInput: document.getElementById("tavilyInput"),
+  tavilyInputBackup: document.getElementById("tavilyInputBackup"),
   modelSel: document.getElementById("modelSel"),
   voiceSel: document.getElementById("voiceSel"),
   micSel: document.getElementById("micSel"),
@@ -65,14 +68,14 @@ const orb = createOrb(els.orbCanvas);
 
 // ── State & Config ────────────────────────────────────────────────────────
 const VALID_MODELS = [
-  "gemini-2.5-flash-native-audio-preview",
-  "gemini-3.1-flash-live-preview",
   "gemini-3.8-live",
+  "gemini-3.8-live-extended-thinking",
+  "gemini-3.1-flash-live-preview",
 ];
 const storedModel = localStorage.getItem("voxa.model");
 const defaultModel = storedModel && VALID_MODELS.includes(storedModel)
   ? storedModel
-  : "gemini-2.5-flash-native-audio-preview";
+  : "gemini-3.8-live";
 
 const SETTINGS = {
   sources: ["http://localhost:3010"],
@@ -82,7 +85,7 @@ const SETTINGS = {
   },
   persona: {
     name: "Companion",
-    instruction: "You are a concise, helpful desktop voice assistant living in a minimal glowing orb. Respond directly, naturally, and warmly in 1-2 spoken sentences.",
+    instruction: "You are a concise voice assistant. Your only capabilities are answering user queries and conducting web searches. Do not perform any system actions or UI modifications. Keep spoken responses short, natural, and helpful.",
   },
   ui: {
     pushToTalk: false,
@@ -424,7 +427,7 @@ async function hydrateGeminiKeyFromHarness() {
 
 async function askForKey() {
   setStatus("Key required");
-  setLine("Enter your Gemini API key in Settings");
+  setLine("Gemini API key required: enter in Settings");
   await openSettings();
   const aiTabBtn = els.settings?.querySelector('.settings-tab[data-tab="ai"]');
   aiTabBtn?.click();
@@ -434,12 +437,21 @@ async function askForKey() {
   }
 }
 
+let activeGeminiKeyIndex = 1;
+
 async function startSession() {
   if (session || starting) return;
   starting = true;
   await loadVoxaConfig();
 
-  let apiKey = (localStorage.getItem("voxa.geminiKey") || "").trim();
+  const key1 = (localStorage.getItem("voxa.geminiKey") || "").trim();
+  const key2 = (localStorage.getItem("voxa.geminiKeyBackup") || "").trim();
+
+  let apiKey = activeGeminiKeyIndex === 2 && key2 ? key2 : key1;
+  if (!apiKey && activeGeminiKeyIndex === 2 && key1) {
+    activeGeminiKeyIndex = 1;
+    apiKey = key1;
+  }
   if (!apiKey) {
     apiKey = await hydrateGeminiKeyFromHarness();
   }
@@ -457,23 +469,8 @@ async function startSession() {
 
   const toolBridge = new ToolBridge(SETTINGS.sources);
 
-  // Local tools executable by voice
-  const localTools = [
-    {
-      name: "set_theme",
-      description: "Switch the orb UI theme. Options: 'black' (black background with white accent) or 'nord' (arctic slate background with blue accent).",
-      parameters: {
-        type: "object",
-        properties: { theme: { type: "string", description: "Either 'black' or 'nord'" } },
-        required: ["theme"],
-      },
-      handler: async (args) => {
-        const th = resolveTheme(args?.theme);
-        chooseTheme(th);
-        return `Theme set to ${th}.`;
-      },
-    },
-  ];
+  // Local tools executable by voice (theme switching removed)
+  const localTools = [];
 
   try {
     session = new GeminiSession({
@@ -513,6 +510,18 @@ async function startSession() {
             els.micMeter.style.width = `${pct}%`;
           }
         },
+        tool: (name, args, status, out) => {
+          if (status === "running") {
+            const q = args?.query || args?.topic || "";
+            setLine(q ? `Searching: "${q}"…` : `Using tool: ${name}…`);
+          } else if (status === "done") {
+            if (out?.notice) {
+              pushHistory("bot", `[Search notice] ${out.notice}`);
+            }
+          } else if (status === "error" || out?.error) {
+            pushHistory("bot", `[Tool error: ${name}] ${out?.error || "Action failed"}`);
+          }
+        },
         userText: (text) => {
           setLine(text, true);
           const last = els.feed?.lastElementChild;
@@ -538,11 +547,22 @@ async function startSession() {
         error: (err) => {
           console.error("[orb] Session error:", err);
           const msg = err?.message || String(err) || "Session error";
+          const isQuotaOrAuth = /api key|apikey|api_key|401|403|429|resourceexhausted|quota|unauthorized/i.test(msg);
+
+          if (isQuotaOrAuth && activeGeminiKeyIndex === 1 && key2) {
+            console.warn("[orb] Gemini Key 1 error, attempting failover to Backup key:", msg);
+            activeGeminiKeyIndex = 2;
+            pushHistory("bot", `[Gemini Live] Key 1 error (${msg.slice(0, 80)}) — switching to Backup Key…`);
+            stopSession(true);
+            setTimeout(() => { startSession().catch(() => {}); }, 250);
+            return;
+          }
+
           setStatus("Error");
           setLine(msg, false);
           pushHistory("bot", `[Error] ${msg}`);
           stopSession(true);
-          if (/api key|apikey|api_key|401|403|unauthorized/i.test(msg)) {
+          if (isQuotaOrAuth) {
             askForKey();
           }
         },
@@ -557,6 +577,17 @@ async function startSession() {
   } catch (err) {
     console.error("[orb] Failed to start Gemini Live:", err);
     let msg = err?.message || String(err) || "Connection failed";
+    const isQuotaOrAuth = /api key|apikey|api_key|401|403|429|resourceexhausted|quota|unauthorized/i.test(msg);
+
+    if (isQuotaOrAuth && activeGeminiKeyIndex === 1 && key2) {
+      console.warn("[orb] Gemini Key 1 connect failure, attempting failover to Backup key:", msg);
+      activeGeminiKeyIndex = 2;
+      pushHistory("bot", `[Gemini Live] Primary key error (${msg.slice(0, 80)}) — switching to Backup Key…`);
+      stopSession(true);
+      setTimeout(() => { startSession().catch(() => {}); }, 250);
+      return;
+    }
+
     if (/permission denied|notallowederror|notfounderror/i.test(msg)) {
       msg = "Microphone blocked: grant mic permission in browser";
     }
@@ -564,7 +595,7 @@ async function startSession() {
     setLine(msg);
     pushHistory("bot", `[Error] ${msg}`);
     stopSession(true);
-    if (/api key|apikey|api_key|401|403|unauthorized/i.test(msg)) {
+    if (isQuotaOrAuth) {
       askForKey();
     }
   } finally {
@@ -586,6 +617,10 @@ function stopSession(preserveError = false) {
 }
 
 function toggleSession() {
+  try {
+    if (session?.player) session.player.unlock();
+    if (session?.mic) session.mic.resume();
+  } catch {}
   if (state === "idle") startSession();
   else stopSession();
 }
@@ -630,6 +665,11 @@ els.orb.addEventListener("click", (e) => {
     isDraggingOrb = false;
     return;
   }
+  // User gesture: unlock Web Audio autoplay policy
+  try {
+    const dummyCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (dummyCtx.state === "suspended") dummyCtx.resume().catch(() => {});
+  } catch {}
   toggleSession();
 });
 
@@ -779,20 +819,86 @@ function wireSettingsTabs() {
 }
 
 function syncSettingsInputs() {
+  const syncTavilyToHarness = async () => {
+    const tKey1 = (localStorage.getItem("voxa.tavilyKey") || "").trim();
+    const tKey2 = (localStorage.getItem("voxa.tavilyKeyBackup") || "").trim();
+    const baseUrl = (SETTINGS.sources && SETTINGS.sources[0]) || "http://localhost:3010";
+    try {
+      await fetch(`${baseUrl}/api/connectors/websearch/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: "auto",
+          tavilyKey: tKey1,
+          tavilyKeyBackup: tKey2,
+        }),
+      });
+    } catch {}
+  };
+
   if (els.keyInput) {
     els.keyInput.value = localStorage.getItem("voxa.geminiKey") || "";
     const saveKey = () => {
       const val = els.keyInput.value.trim();
-      if (val) {
-        localStorage.setItem("voxa.geminiKey", val);
-        setLine("Gemini key saved");
-      }
+      localStorage.setItem("voxa.geminiKey", val);
+      activeGeminiKeyIndex = 1;
+      setLine(val ? "Gemini key saved" : "Gemini key cleared");
     };
     els.keyInput.addEventListener("change", saveKey);
     els.keyInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         saveKey();
         els.keyInput.blur();
+      }
+    });
+  }
+
+  if (els.keyInputBackup) {
+    els.keyInputBackup.value = localStorage.getItem("voxa.geminiKeyBackup") || "";
+    const saveBackup = () => {
+      const val = els.keyInputBackup.value.trim();
+      localStorage.setItem("voxa.geminiKeyBackup", val);
+      setLine(val ? "Backup Gemini key saved" : "Backup key cleared");
+    };
+    els.keyInputBackup.addEventListener("change", saveBackup);
+    els.keyInputBackup.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        saveBackup();
+        els.keyInputBackup.blur();
+      }
+    });
+  }
+
+  if (els.tavilyInput) {
+    els.tavilyInput.value = localStorage.getItem("voxa.tavilyKey") || "";
+    const saveTavily = () => {
+      const val = els.tavilyInput.value.trim();
+      localStorage.setItem("voxa.tavilyKey", val);
+      syncTavilyToHarness();
+      setLine(val ? "Tavily key saved" : "Tavily key cleared");
+    };
+    els.tavilyInput.addEventListener("change", saveTavily);
+    els.tavilyInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        saveTavily();
+        els.tavilyInput.blur();
+      }
+    });
+  }
+
+  if (els.tavilyInputBackup) {
+    els.tavilyInputBackup.value = localStorage.getItem("voxa.tavilyKeyBackup") || "";
+    const saveTavilyBackup = () => {
+      const val = els.tavilyInputBackup.value.trim();
+      localStorage.setItem("voxa.tavilyKeyBackup", val);
+      syncTavilyToHarness();
+      setLine(val ? "Backup Tavily key saved" : "Backup Tavily cleared");
+    };
+    els.tavilyInputBackup.addEventListener("change", saveTavilyBackup);
+    els.tavilyInputBackup.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        saveTavilyBackup();
+        els.tavilyInputBackup.blur();
       }
     });
   }
@@ -898,7 +1004,8 @@ els.contextMenu?.addEventListener("click", async (e) => {
 // ── Keyboard Shortcuts ────────────────────────────────────────────────────
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space" && (e.ctrlKey || e.metaKey)) {
-    if (document.activeElement === els.composerInput || document.activeElement === els.keyInput) return;
+    const isEditingKey = [els.keyInput, els.keyInputBackup, els.tavilyInput, els.tavilyInputBackup, els.composerInput].includes(document.activeElement);
+    if (isEditingKey) return;
     e.preventDefault();
     toggleSession();
   } else if (e.key === "Escape") {

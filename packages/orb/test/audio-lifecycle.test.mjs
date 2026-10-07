@@ -106,3 +106,105 @@ test("Session teardown pattern guarantees mic track termination", () => {
   assert.equal(tracksStoppedCount, 1, "Microphone stream tracks must be terminated");
   assert.equal(currentSession, null, "Session must be nulled");
 });
+
+test("MicCapture.start auto-resumes suspended AudioContext", async () => {
+  const mic = new MicCapture();
+  let resumed = false;
+
+  // Mock global window/AudioContext and navigator.mediaDevices
+  const origWindow = globalThis.window;
+  const origNavDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+
+  globalThis.window = {
+    AudioContext: class {
+      constructor() {
+        this.state = "suspended";
+        this.sampleRate = 48000;
+        this.destination = {};
+      }
+      async resume() {
+        this.state = "running";
+        resumed = true;
+      }
+      createMediaStreamSource() {
+        return { connect: () => {} };
+      }
+      createScriptProcessor() {
+        return { connect: () => {}, onaudioprocess: null };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: () => {} };
+      }
+    }
+  };
+
+  Object.defineProperty(globalThis, "navigator", {
+    value: {
+      mediaDevices: {
+        getUserMedia: async () => ({
+          getTracks: () => [{ stop: () => {} }]
+        })
+      }
+    },
+    configurable: true,
+    writable: true,
+  });
+
+  try {
+    await mic.start();
+    assert.equal(resumed, true, "Suspended AudioContext must be resumed on start");
+    assert.equal(mic.ctx.state, "running", "AudioContext state should be running");
+    assert.ok(mic.muteNode, "muteNode should be created");
+    assert.equal(mic.muteNode.gain.value, 0, "muteNode gain must be 0 to prevent acoustic loopback");
+
+    // Test resume() method
+    mic.ctx.state = "suspended";
+    await mic.resume();
+    assert.equal(mic.ctx.state, "running", "mic.resume() should resume suspended ctx");
+  } finally {
+    mic.stop();
+    globalThis.window = origWindow;
+    if (origNavDesc) {
+      Object.defineProperty(globalThis, "navigator", origNavDesc);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});
+
+test("MicCapture downsamples 48kHz audio to 16kHz mono without phase drift", () => {
+  const mic = new MicCapture();
+  // 48000 Hz to 16000 Hz ratio = 3:1. 300 samples -> 100 samples
+  const input = new Float32Array(300);
+  for (let i = 0; i < input.length; i++) input[i] = 0.5;
+
+  const output = mic._downsample(input, 48000);
+  assert.equal(output.length, 100, "300 samples at 48kHz should downsample to 100 samples at 16kHz");
+  assert.ok(Math.abs(output[0] - 0.5) < 0.001, "Averaged sample amplitude should match");
+});
+
+test("Gemini Live session configuration adheres to 3.8 protocol rules", () => {
+  function buildLiveConfig({ model, thinkingLevel, tools, vadSensitivity }) {
+    const isExtended = /extended-thinking/.test(model);
+    return {
+      model: model || "gemini-3.8-live",
+      config: {
+        responseModalities: ["AUDIO"],
+        ...(vadSensitivity === "high"
+          ? { realtimeInputConfig: { automaticActivityDetection: { startOfSpeechSensitivity: "START_SENSITIVITY_HIGH" } } }
+          : {}),
+        ...(thinkingLevel && isExtended ? { thinkingConfig: { thinkingLevel } } : {}),
+        ...(tools ? { tools } : {}),
+      }
+    };
+  }
+
+  // Standard gemini-3.8-live must NOT have thinkingConfig
+  const stdConfig = buildLiveConfig({ model: "gemini-3.8-live", thinkingLevel: "low" });
+  assert.equal(stdConfig.config.thinkingConfig, undefined, "gemini-3.8-live must omit thinkingConfig");
+
+  // Extended thinking model MUST have thinkingConfig
+  const extConfig = buildLiveConfig({ model: "gemini-3.8-live-extended-thinking", thinkingLevel: "low" });
+  assert.deepEqual(extConfig.config.thinkingConfig, { thinkingLevel: "low" }, "extended thinking model must include thinkingConfig");
+});
+

@@ -44,6 +44,9 @@ export class MicCapture {
       },
     });
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === "suspended") {
+      try { await this.ctx.resume(); } catch {}
+    }
     this.source = this.ctx.createMediaStreamSource(this.stream);
     // ScriptProcessor is deprecated but zero-dependency and battle-tested in
     // this repo (see voxa.js). AudioWorklet is the eventual upgrade.
@@ -64,7 +67,22 @@ export class MicCapture {
     };
 
     this.source.connect(this.processor);
-    this.processor.connect(this.ctx.destination); // required for the node to fire
+    // Connect through a zero-gain node to destination so the Web Audio graph
+    // actively pulls samples without looping microphone audio into speakers.
+    this.muteNode = this.ctx.createGain ? this.ctx.createGain() : null;
+    if (this.muteNode) {
+      this.muteNode.gain.value = 0;
+      this.processor.connect(this.muteNode);
+      this.muteNode.connect(this.ctx.destination);
+    } else {
+      this.processor.connect(this.ctx.destination);
+    }
+  }
+
+  async resume() {
+    if (this.ctx && this.ctx.state === "suspended") {
+      try { await this.ctx.resume(); } catch {}
+    }
   }
 
   // Live make-up gain change — no getUserMedia restart needed.
@@ -72,11 +90,12 @@ export class MicCapture {
 
   stop() {
     this.active = false;
+    try { this.muteNode && this.muteNode.disconnect(); } catch {}
     try { this.processor && this.processor.disconnect(); } catch {}
     try { this.source && this.source.disconnect(); } catch {}
     try { this.stream && this.stream.getTracks().forEach((t) => t.stop()); } catch {}
     try { this.ctx && this.ctx.close(); } catch {}
-    this.processor = this.source = this.stream = this.ctx = null;
+    this.muteNode = this.processor = this.source = this.stream = this.ctx = null;
     this._tail = new Float32Array(0);
     this.onLevel(0);
   }
@@ -177,10 +196,12 @@ export class PcmPlayer {
 
     let startAt;
     if (this.firstFrame) {
-      startAt = ctx.currentTime + 0.03;   // small lead so the source fires
+      // 120ms initial pre-buffer lead time absorbs network packet arrival jitter
+      startAt = ctx.currentTime + 0.12;
       this.firstFrame = false;
     } else if (this.nextStart < ctx.currentTime) {
-      startAt = ctx.currentTime + 0.01;   // underrun recovery
+      // Underrun recovery: smoothly schedule immediately with a 20ms micro-lead to prevent pops
+      startAt = ctx.currentTime + 0.02;
     } else {
       startAt = this.nextStart;
     }

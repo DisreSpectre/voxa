@@ -115,7 +115,12 @@ async function ddgSearch(query, count = 3) {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
       },
       body: `q=${encodeURIComponent(query)}`,
       signal: AbortSignal.timeout(9000),
@@ -151,7 +156,7 @@ async function ddgSearch(query, count = 3) {
   // 3. Fallback to Wikipedia search (reliable, zero-rate-limit encyclopedia & facts)
   try {
     const wiki = await wikipediaSearch(query, count);
-    if (wiki.items?.length) return wiki;
+    if (wiki.items?.length) return { ...wiki, notice: "DuckDuckGo rate-limited; fetched from Wikipedia" };
   } catch {}
 
   return { items: [] };
@@ -199,16 +204,22 @@ async function googleNewsSearch(topic, count = 3) {
   }
 }
 
-function render(query, answer, items) {
-  if (answer) return { result: clip(answer, 600) };
-  if (!items?.length) return { result: `No results for "${query}".` };
-  // Include the real URL on each result so the model has a verified link to open
-  // in the viewport (instead of fabricating one). It need not read URLs aloud.
-  const lines = items.map((x, i) => {
-    const head = [x.title, clip(x.snippet)].filter(Boolean).join(" — ");
-    return `${i + 1}. ${head}${x.url ? ` <${x.url}>` : ""}`;
-  });
-  return { result: lines.join("  ") };
+function render(query, answer, items, notice = "") {
+  let result = "";
+  if (answer) {
+    result = clip(answer, 600);
+  } else if (!items?.length) {
+    result = `No results for "${query}".`;
+  } else {
+    // Include the real URL on each result so the model has a verified link to open
+    // in the viewport (instead of fabricating one). It need not read URLs aloud.
+    const lines = items.map((x, i) => {
+      const head = [x.title, clip(x.snippet)].filter(Boolean).join(" — ");
+      return `${i + 1}. ${head}${x.url ? ` <${x.url}>` : ""}`;
+    });
+    result = lines.join("  ");
+  }
+  return notice ? { result, notice } : { result };
 }
 
 // Image search — returns DIRECT image URLs (the actual .jpg/.png), not page links.
@@ -251,13 +262,16 @@ export default {
   icon: "⌕",
 
   config: [
-    { key: "provider", label: "Provider", type: "text", default: "duckduckgo", help: "brave | tavily | serpapi | duckduckgo. brave/tavily/serpapi need an API key; duckduckgo is keyless (quick facts only)." },
-    { key: "apiKey", label: "API key", type: "text", secret: true, help: "Required for brave / tavily / serpapi. Leave blank for duckduckgo." },
+    { key: "provider", label: "Provider", type: "text", default: "auto", help: "auto | tavily | brave | serpapi | duckduckgo. 'auto' prefers Tavily if configured, falling back to DuckDuckGo/Wikipedia." },
+    { key: "tavilyKey", label: "Tavily API key (Primary)", type: "text", secret: true, help: "Primary key for Tavily LLM search." },
+    { key: "tavilyKeyBackup", label: "Tavily API key (Backup)", type: "text", secret: true, help: "Backup key for Tavily if primary hits rate limits (429) or fails." },
+    { key: "apiKey", label: "General API key", type: "text", secret: true, help: "API key for Brave, Tavily (single), or SerpApi." },
   ],
 
   async test(cfg) {
     const p = provider(cfg);
-    if ((p === "brave" || p === "tavily" || p === "serpapi") && !cfg.apiKey) return { ok: false, message: `${p} needs an API key.` };
+    if ((p === "brave" || p === "serpapi") && !cfg.apiKey) return { ok: false, message: `${p} needs an API key.` };
+    if (p === "tavily" && !cfg.tavilyKey && !cfg.apiKey) return { ok: false, message: "Tavily needs an API key." };
     try {
       const out = await runSearch(cfg, "hello world", 1);
       return { ok: true, message: `Ready (${p}). Sample returned ${out.result ? "a result" : "nothing"}.` };
@@ -329,9 +343,12 @@ export default {
         try {
           const p = provider(cfg);
           if (p === "brave") return render(topic, "", await braveSearch(cfg, BRAVE_NEWS, topic, count));
-          if (p === "tavily") { const o = await tavilySearch(cfg, topic, count, "news"); return render(topic, o.answer, o.items); }
+          if (p === "tavily" || cfg.tavilyKey || (p === "auto" && (cfg.tavilyKey || cfg.tavilyKeyBackup))) {
+            const tRes = await tavilyWithFailover(cfg, topic, count, "news");
+            if (tRes) return render(topic, tRes.answer, tRes.items, tRes.notice);
+          }
           const o = await ddgSearch(topic, count);
-          if (o.items?.length || o.answer) return render(topic, o.answer, o.items);
+          if (o.items?.length || o.answer) return render(topic, o.answer, o.items, o.notice);
           const news = await googleNewsSearch(topic, count);
           return render(topic, "", news.items);
         } catch (e) { return { error: e?.message || String(e) }; }
@@ -340,11 +357,58 @@ export default {
   ],
 };
 
-// Shared search dispatch (also used by test()).
+// Dual Tavily search with automatic failover on 401/403/429
+async function tavilyWithFailover(cfg, query, count, topic) {
+  const key1 = cfg.tavilyKey || cfg.apiKey;
+  const key2 = cfg.tavilyKeyBackup;
+  let notice = "";
+
+  if (key1) {
+    try {
+      const res = await tavilySearch({ apiKey: key1 }, query, count, topic);
+      return { ...res, notice };
+    } catch (err) {
+      console.warn("[websearch] Tavily Key 1 failed:", err.message);
+      const isRecoverable = /401|403|429|limit|quota|rejected/i.test(err.message);
+      if (key2 && isRecoverable) {
+        try {
+          const res = await tavilySearch({ apiKey: key2 }, query, count, topic);
+          notice = "Tavily Key 1 quota/auth error; switched to Backup Key";
+          return { ...res, notice };
+        } catch (err2) {
+          console.warn("[websearch] Tavily Key 2 failed:", err2.message);
+          notice = `Tavily failed: ${err.message}`;
+        }
+      } else {
+        notice = `Tavily error: ${err.message}`;
+      }
+    }
+  }
+  return null;
+}
+
+// Shared search dispatch with scenario routing & resilient fallbacks
 async function runSearch(cfg, query, count) {
   const p = provider(cfg);
+
+  // Explicit provider overrides
   if (p === "brave") return render(query, "", await braveSearch(cfg, BRAVE_WEB, query, count));
-  if (p === "tavily") { const o = await tavilySearch(cfg, query, count); return render(query, o.answer, o.items); }
   if (p === "serpapi") { const o = await serpapiSearch(cfg, query, count, false); return render(query, o.answer, o.items); }
-  const o = await ddgSearch(query, count); return render(query, o.answer, o.items);
+
+  // 1. Tavily (Preferred for high quality LLM synthesis if keys are available or provider is 'tavily'/'auto')
+  if (p === "tavily" || p === "auto" || cfg.tavilyKey || cfg.tavilyKeyBackup) {
+    const isNews = /latest|news|today|yesterday|launched|breaking|update|release/i.test(query);
+    const tRes = await tavilyWithFailover(cfg, query, count, isNews ? "news" : "general");
+    if (tRes) return render(query, tRes.answer, tRes.items, tRes.notice);
+  }
+
+  // 2. Scenario-based Routing: If looking for entity definitions/encyclopedia facts, try Wikipedia directly
+  if (/^(who|what|where)\s+(is|was|are|were)\b/i.test(query) || /^define\b/i.test(query)) {
+    const wiki = await wikipediaSearch(query, count);
+    if (wiki?.items?.length) return render(query, "", wiki.items, "Fetched from Wikipedia");
+  }
+
+  // 3. DuckDuckGo with browser-like headers & resilient fallback
+  const o = await ddgSearch(query, count);
+  return render(query, o.answer, o.items, o.notice);
 }

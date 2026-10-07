@@ -145,8 +145,8 @@ export const ALL_GEMINI_VOICES = [
 export const DEFAULT_VOICE = "Aoede";
 
 export const DEFAULT_LIVE_MODELS = [
-  { id: "gemini-3.1-flash-live-preview", name: "Gemini 3.1 Flash Live", blurb: "Real-time streaming audio model (Recommended)" },
-  { id: "gemini-2.5-flash-native-audio-preview", name: "Gemini 2.5 Flash Audio", blurb: "Native audio preview with multimodal reasoning" },
-  { id: "gemini-3.8-live", name: "Gemini 3.8 Live", blurb: "High reasoning live streaming model" },
+  { id: "gemini-3.8-live", name: "Gemini 3.8 Live", blurb: "Default low-latency realtime voice model (Recommended)" },
+  { id: "gemini-3.8-live-extended-thinking", name: "Gemini 3.8 Live Extended Thinking", blurb: "High-reasoning live model with background thinking" },
+  { id: "gemini-3.1-flash-live-preview", name: "Gemini 3.1 Flash Live", blurb: "Streaming audio preview model" },
 ];
-export const DEFAULT_MODEL = "gemini-3.1-flash-live-preview";
+export const DEFAULT_MODEL = "gemini-3.8-live";

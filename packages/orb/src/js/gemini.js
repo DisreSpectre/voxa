@@ -47,9 +47,8 @@ function clampToolResponse(out) {
 // from the tools actually loaded, so the model is never pointed at memory
 // tools a given build doesn't ship.
 export const TOOL_GUIDE =
-  "\n\nYou are wired to live tools. When the operator asks about anything a " +
-  "tool covers — web search, current news, weather forecasts, system resource statistics, or UI theme switching — " +
-  "CALL THE RELEVANT TOOL instead of guessing. Prefer acting via tools over saying you can't. IMPORTANT: " +
+  "\n\nYou are wired to live tools for web search and current news. When the operator asks about anything that requires searching the web or latest information, " +
+  "CALL THE RELEVANT TOOL. Do not perform any system actions or UI theme modifications. IMPORTANT: " +
   "tool calls take a moment — BEFORE you call one, say a short spoken heads-up " +
   "so the operator isn't left waiting, e.g. \"one sec, checking that…\" or " +
   "\"hold on, pulling that up.\" Then call the tool and report what you found.";
@@ -102,11 +101,10 @@ function geminiSchema(schema) {
 export class GeminiSession {
   constructor({ apiKey, model, voice, thinkingLevel, systemInstruction, toolBridge, on, micDeviceId, localTools, extraInstruction, muted, audio } = {}) {
     this.apiKey = apiKey;
-    this.model = model || "gemini-3.1-flash-live-preview";
+    this.model = model || "gemini-3.8-live";
     this.voice = voice || "Aoede";
-    // gemini-3.8-live-extended-thinking rejects setup (close 1007 "Thinking level
-    // must be specified") without a level, so it defaults to "low" to keep voice
-    // latency down. Other models only get thinkingConfig when explicitly set.
+    // gemini-3.8-live-extended-thinking requires thinkingLevel ("low", "medium", "high").
+    // Standard gemini-3.8-live does not accept thinkingConfig.
     this.thinkingLevel = thinkingLevel || (/extended-thinking/.test(this.model) ? "low" : "");
     this.micDeviceId = micDeviceId || null;
     // Mic tuning the operator can experiment with from the orb settings.
@@ -179,9 +177,7 @@ export class GeminiSession {
         this.on.error("Tool bridge unavailable: " + (e?.message || e));
       }
     }
-    if (fnDecls.length) tools = [{ functionDeclarations: fnDecls }];
-
-    this.session = await this.ai.live.connect({
+    const sessionPromise = this.ai.live.connect({
       model: this.model,
       config: {
         responseModalities: [Modality.AUDIO],
@@ -200,11 +196,14 @@ export class GeminiSession {
           : this.audio.vadSensitivity === "low"
           ? { realtimeInputConfig: { automaticActivityDetection: { startOfSpeechSensitivity: "START_SENSITIVITY_LOW" } } }
           : {}),
-        ...(this.thinkingLevel ? { thinkingConfig: { thinkingLevel: this.thinkingLevel } } : {}),
+        ...(this.thinkingLevel && /extended-thinking/.test(this.model) ? { thinkingConfig: { thinkingLevel: this.thinkingLevel } } : {}),
         ...(tools ? { tools } : {}),
       },
       callbacks: {
-        onopen: () => this._onOpen(),
+        onopen: async () => {
+          this.session = await sessionPromise;
+          this._onOpen();
+        },
         onmessage: (m) => this._onMessage(m),
         onerror: (e) => {
           try { this.mic && this.mic.stop(); } catch {}
@@ -221,6 +220,7 @@ export class GeminiSession {
         },
       },
     });
+    this.session = await sessionPromise;
   }
 
   async _onOpen() {
@@ -236,6 +236,9 @@ export class GeminiSession {
       autoGainControl: this.audio.autoGainControl,
       onFrame: (pcm) => {
         if (!this.session || !this.active || this.micMuted) return;
+        // Suppress microphone frames during assistant speech playback to prevent
+        // speaker acoustic feedback from triggering false server-side barge-in cuts.
+        if (this.player?.playing) return;
         try {
           this.session.sendRealtimeInput({
             audio: { data: int16ToBase64(pcm), mimeType: "audio/pcm;rate=16000" },
@@ -364,7 +367,7 @@ export class GeminiSession {
         pendingImages.push(out.image);
         out = { result: (typeof out.result === "string" && out.result) || "Captured — viewing it now." };
       }
-      this.on.tool(fc.name, fc.args, out.error ? "error" : "done", out.error || out.result);
+      this.on.tool(fc.name, fc.args, out.error ? "error" : "done", out);
       responses.push({ id: fc.id, name: fc.name, response: clampToolResponse(out) });
     }
     try {

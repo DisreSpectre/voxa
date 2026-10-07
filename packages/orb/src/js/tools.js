@@ -51,10 +51,10 @@ export class ToolBridge {
       });
       const data = await res.json().catch(() => ({}));
       if (data.error) return { error: data.error };
-      // A connector may hand back an `image` (e.g. the screen connector) for the
-      // model to SEE — the GeminiSession injects it as a session image turn since
-      // a tool's text result can't carry a picture the model can interpret.
-      return data.image?.data ? { result: data.result, image: data.image } : { result: data.result };
+      const resObj = { result: data.result };
+      if (data.image?.data) resObj.image = data.image;
+      if (data.notice) resObj.notice = data.notice;
+      return resObj;
     } catch (e) {
       return { error: String(e?.message || e) };
     }

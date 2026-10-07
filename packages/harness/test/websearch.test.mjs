@@ -20,3 +20,12 @@ test("websearch test() passes", async () => {
   const r = await websearch.test({});
   assert.equal(r.ok, true, `Test should pass: ${r.message}`);
 });
+
+test("websearch entity query routes through Wikipedia cleanly", async () => {
+  const handler = websearch.actions.find((a) => a.name === "websearch_query").handler;
+  const out = await handler({ query: "What is photosynthesis", count: 2 }, { provider: "auto" });
+  assert.ok(out && out.result, "Should return results");
+  assert.ok(!out.error, "Should not return an error");
+  assert.ok(out.result.toLowerCase().includes("photosynthesis"), "Should include photosynthesis in result");
+});
+

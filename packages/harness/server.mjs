@@ -140,14 +140,25 @@ function isLoopback(req) {
 app.get("/api/secrets", async (req, res) => {
   if (!isLoopback(req)) return res.status(403).json({ error: "loopback only" });
   const cfg = (await getState(SECRETS_ID)).config || {};
-  res.json({ keys: Object.keys(cfg).map((k) => ({ key: k, set: !!cfg[k] })) });
+  const hasEnvGemini = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+  const keysMap = new Map();
+  for (const k of Object.keys(cfg)) {
+    keysMap.set(k, { key: k, set: !!cfg[k] });
+  }
+  if (!keysMap.has("geminiApiKey") && hasEnvGemini) {
+    keysMap.set("geminiApiKey", { key: "geminiApiKey", set: true });
+  }
+  res.json({ keys: Array.from(keysMap.values()) });
 });
 
 // Read one secret UNMASKED — loopback only.
 app.get("/api/secrets/:key", async (req, res) => {
   if (!isLoopback(req)) return res.status(403).json({ error: "loopback only" });
   const cfg = (await getState(SECRETS_ID)).config || {};
-  const value = cfg[req.params.key];
+  const envVal = req.params.key === "geminiApiKey"
+    ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)
+    : process.env[req.params.key];
+  const value = cfg[req.params.key] ?? envVal;
   if (value === undefined) return res.status(404).json({ error: "not set" });
   res.json({ key: req.params.key, value });
 });
@@ -221,7 +232,10 @@ app.post("/api/voice/tools/call", async (req, res) => {
     // Pass an `image` through verbatim so vision connectors (e.g. screen) can hand
     // the orb a picture to inject into the live session. The model never sees the
     // base64 in a tool response; the orb routes it into session content instead.
-    return res.json(out?.image?.data ? { result, image: out.image } : { result });
+    const resPayload = { result };
+    if (out?.image?.data) resPayload.image = out.image;
+    if (out?.notice) resPayload.notice = out.notice;
+    return res.json(resPayload);
   } catch (e) {
     console.error(`[harness] tool call "${name}" THREW: ${e?.message || e}`);
     return res.json({ error: e?.message || String(e) });

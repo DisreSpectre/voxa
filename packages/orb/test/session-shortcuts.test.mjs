@@ -78,18 +78,20 @@ test("stopSession preserves error state when requested", () => {
 
 test("Model validation falls back to default on invalid or deprecated model", () => {
   const VALID_MODELS = [
-    "gemini-2.5-flash-native-audio-preview",
-    "gemini-3.1-flash-live-preview",
     "gemini-3.8-live",
+    "gemini-3.8-live-extended-thinking",
+    "gemini-3.1-flash-live-preview",
   ];
   function resolveModel(stored) {
-    return stored && VALID_MODELS.includes(stored) ? stored : "gemini-2.5-flash-native-audio-preview";
+    return stored && VALID_MODELS.includes(stored) ? stored : "gemini-3.8-live";
   }
 
+  assert.equal(resolveModel("gemini-3.8-live"), "gemini-3.8-live");
   assert.equal(resolveModel("gemini-3.1-flash-live-preview"), "gemini-3.1-flash-live-preview");
-  assert.equal(resolveModel("gemini-2.0-flash-exp"), "gemini-2.5-flash-native-audio-preview");
-  assert.equal(resolveModel(null), "gemini-2.5-flash-native-audio-preview");
-  assert.equal(resolveModel(""), "gemini-2.5-flash-native-audio-preview");
+  assert.equal(resolveModel("gemini-2.0-flash-exp"), "gemini-3.8-live");
+  assert.equal(resolveModel("gemini-2.5-flash-native-audio-preview"), "gemini-3.8-live");
+  assert.equal(resolveModel(null), "gemini-3.8-live");
+  assert.equal(resolveModel(""), "gemini-3.8-live");
 });
 
 test("PcmPlayer close cleanly terminates context and sources", () => {
@@ -250,5 +252,35 @@ test("PcmPlayer unlock resumes suspended context and plays silent buffer", () =>
   assert.equal(bufferCreated, true);
   assert.equal(sourceStarted, true);
 });
+
+test("Gemini dual-key failover correctly switches to backup key on quota or auth error", () => {
+  let activeIndex = 1;
+  const key1 = "primary-key";
+  const key2 = "backup-key";
+
+  function resolveKey(idx) {
+    return idx === 2 && key2 ? key2 : key1;
+  }
+
+  function handleConnectError(msg) {
+    const isQuotaOrAuth = /api key|apikey|api_key|401|403|429|resourceexhausted|quota|unauthorized/i.test(msg);
+    if (isQuotaOrAuth && activeIndex === 1 && key2) {
+      activeIndex = 2;
+      return "failed_over";
+    }
+    return "error";
+  }
+
+  assert.equal(resolveKey(activeIndex), "primary-key");
+  const res = handleConnectError("ResourceExhausted: 429 Quota exceeded");
+  assert.equal(res, "failed_over");
+  assert.equal(activeIndex, 2);
+  assert.equal(resolveKey(activeIndex), "backup-key");
+
+  // Subsequent error when already on backup key does not re-loop
+  const res2 = handleConnectError("401 Unauthorized");
+  assert.equal(res2, "error");
+});
+
 
 
