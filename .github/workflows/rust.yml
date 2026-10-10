@@ -21,7 +21,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       
     - name: Build
-      run: cargo build --manifest-path ./src-tauri/Cargo.toml --verbose
+      run: cargo build --manifest-path ./packages/orb/src-tauri/Cargo.toml --verbose
       
     - name: Run tests
-      run: cargo test --manifest-path ./src-tauri/Cargo.toml --verbose
+      run: cargo test --manifest-path ./packages/orb/src-tauri/Cargo.toml --verbose
